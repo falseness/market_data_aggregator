@@ -1,6 +1,10 @@
+#![feature(btree_cursors)]
+
+use std::borrow::Borrow;
 use std::collections::BTreeMap;
 use std::cmp::Ordering;
 use std::convert::From;
+use std::ops::Bound;
 
 
 /// Generic trait for order keys (BidKey and AskKey)
@@ -135,7 +139,23 @@ impl<Price: OrderKey> AggregatedL2<Price> {
         self: &mut Self, 
         index: usize
     ) {
-        let last_quote_amount = self.levels.get(&self.aggregated_levels[index].last_price).unwrap();
+        // invariant: уже добавили всё тут в levels
+        let mut cursor = self.levels.lower_bound(Bound::Included(&self.aggregated_levels[index].last_price));
+        debug_assert!(*cursor.peek_next().unwrap().0 == self.aggregated_levels[index].last_price);
+        while self.aggregated_levels[index].total_amount - cursor.peek_next().unwrap().1 >= self.aggregation_table.get_amount(index) {
+            if self.aggregated_levels[index].last_price <= self.max_depth_price {
+                if index + 1 > self.aggregated_levels.len() {
+                    let tmp = cursor.peek_next().unwrap();
+                    self.aggregated_levels.push(AggregatedLevel::new(*tmp.0, *tmp.1));
+                }
+                else {
+                    self.aggregated_levels[index + 1].total_amount += cursor.peek_next().unwrap().1;
+                }
+            }
+            self.aggregated_levels[index].total_amount -= cursor.peek_next().unwrap().1;
+            cursor.prev();
+            self.aggregated_levels[index].last_price = *cursor.peek_next().unwrap().0;
+        } 
         /*while aggregated_levels[index].total_amount - last_quote_amount >= aggregation_table {
 
         }*/
@@ -155,7 +175,7 @@ impl<Price: OrderKey> AggregatedL2<Price> {
             return;
         }
 
-
+        // обнови max_depth_price, что все поля коррект
         // надо добавить в levels
         match self.aggregated_levels.binary_search_by(|level| level.last_price.cmp(&price)) {
             Ok(index) => {
