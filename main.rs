@@ -4,14 +4,18 @@ use std::convert::From;
 
 
 /// Generic trait for order keys (BidKey and AskKey)
-trait OrderKey: Ord + Eq + Copy {}
+trait OrderKey: Ord + Eq + Copy {
+    const MAX: u64;
+}
 
 
 
 /// Bid key (sorted descending)
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 struct BidKey(u64);
-impl OrderKey for BidKey {}
+impl OrderKey for BidKey {
+    const MAX: u64 = 0; 
+}
 impl Ord for BidKey {
     fn cmp(&self, other: &Self) -> Ordering {
         other.0.cmp(&self.0) // Reverse order for highest bid first
@@ -31,7 +35,9 @@ impl From<u64> for BidKey {
 /// Ask key (sorted ascending)
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 struct AskKey(u64);
-impl OrderKey for AskKey {}
+impl OrderKey for AskKey {
+    const MAX: u64 = u64::MAX;
+}
 impl Ord for AskKey {
     fn cmp(&self, other: &Self) -> Ordering {
         self.0.cmp(&other.0) // Normal order for lowest ask first
@@ -49,11 +55,154 @@ impl PartialOrd for AskKey {
     }
 }
 
+
+struct BidSide {
+
+}
+struct AskSide {}
+
+
+trait Side {
+    type PriceKey;
+}
+
+impl Side for BidSide {
+    type PriceKey = BidKey;
+}
+
+impl Side for AskSide {
+    type PriceKey = AskKey;
+}
+
+type Amount = u64;
+/*
+struct AggregatedLevel<Price: OrderKey> {
+    Price last_price;
+    Amount total_amount;
+    BTreeMap<Price, Amount> contained_levels;
+};
+
+impl AggregatedLevel<Price: OrderKey> {
+    fn new(Price price, Amount amount) -> Self {
+        let mut map = BTreeMap::new();
+        map.insert(price, amount);
+        return Self {
+            price, amount, map
+        }
+    }
+}*/
+
+struct AggregatedLevel<Price: OrderKey> {
+    last_price: Price,
+    total_amount: Amount
+}
+
+impl<Price: OrderKey> AggregatedLevel<Price> {
+    fn new(last_price: Price, total_amount: Amount) -> Self {
+        return Self{
+            last_price, total_amount
+        }
+    }
+}
+
+
+
+struct AggregationTable {
+    minimum_amounts: Vec<Amount>,
+    fallback: Amount,
+    max_depth: usize
+}
+
+impl AggregationTable {
+    fn get_amount(self: &Self, index: usize) -> Amount {
+        if index > self.minimum_amounts.len() {
+            return self.fallback;
+        }
+        return self.minimum_amounts[index];
+    }
+}
+
+struct AggregatedL2<Price: OrderKey> {
+    levels: BTreeMap<Price, Amount>,
+    max_depth_price: Price,
+    aggregated_levels: Vec<AggregatedLevel<Price>>,
+    aggregation_table: AggregationTable
+}
+
+// проверь книгу на пустоту
+impl<Price: OrderKey> AggregatedL2<Price> {
+    fn try_propogate_amount_surplus(
+        self: &mut Self, 
+        index: usize
+    ) {
+        let last_quote_amount = self.levels.get(&self.aggregated_levels[index].last_price).unwrap();
+        /*while aggregated_levels[index].total_amount - last_quote_amount >= aggregation_table {
+
+        }*/
+    }
+    fn add_quote(
+        self: &mut Self, 
+        price: Price, 
+        amount: Amount
+    ) {
+        debug_assert!(self.levels.is_empty() == self.aggregated_levels.is_empty());
+        if self.levels.is_empty() {
+            self.levels.insert(price, amount);
+            self.aggregated_levels.push(AggregatedLevel::new(price, amount));
+            if self.aggregation_table.max_depth == 1 {
+                self.max_depth_price = price;
+            }
+            return;
+        }
+
+
+        // надо добавить в levels
+        match self.aggregated_levels.binary_search_by(|level| level.last_price.cmp(&price)) {
+            Ok(index) => {
+                self.aggregated_levels[index].total_amount += amount;
+                //return;
+            }
+            Err(index) => {
+                // ещё depth_price надо подвинуть
+                if index > self.aggregated_levels.len() {
+                    // ...
+                }
+                self.aggregated_levels[index].total_amount += amount;
+                
+                
+            }
+        }
+        /*if Some(index)
+        unwrap_or_else(|e| e);
+        if pos > levels.size() {
+            --pos;
+            // hz перечитай
+        }
+        
+        let key: K = price.into();
+        if is_add {
+            *book.entry(key).or_insert(0.0) += size;
+        } else if let Some(total_size) = book.get_mut(&key) {
+            *total_size -= size;
+            if *total_size <= 0.0 {
+                book.remove(&key);
+            }
+        }*/
+    }
+
+}
+
+
+//type AgregatedL2<Key> = vec!<BTreMap<Keey, f64>>;
+
+
+/*
 /// Order book with L2 depth (price levels)
 #[derive(Debug)]
 struct OrderBook {
-    bids: BTreeMap<BidKey, f64>, // Price → Total Size (Descending)
-    asks: BTreeMap<AskKey, f64>, // Price → Total Size (Ascending)
+    
+    bids: L2<BidKey>, // Price → Total Size (Descending)
+    asks: L2<AskKey>, // Price → Total Size (Ascending)
 }
 
 impl OrderBook {
@@ -120,8 +269,9 @@ impl OrderBook {
         }
     }
 }
-
+*/
 fn main() {
+    /*
     let mut order_book = OrderBook::new();
 
     // Add bids
@@ -144,5 +294,5 @@ fn main() {
     // Remove a bid order
     order_book.remove(101, 5.0, true);
     println!("\nAfter Removing 5 from 101 Bid:");
-    order_book.print_order_book();
+    order_book.print_order_book();*/
 }
