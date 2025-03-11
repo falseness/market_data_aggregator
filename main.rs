@@ -9,7 +9,7 @@ use std::ops::Bound;
 
 /// Generic trait for order keys (BidKey and AskKey)
 trait OrderKey: Ord + Eq + Copy {
-    const MAX: u64;
+    const MAX: Self;
 }
 
 
@@ -18,7 +18,7 @@ trait OrderKey: Ord + Eq + Copy {
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 struct BidKey(u64);
 impl OrderKey for BidKey {
-    const MAX: u64 = 0; 
+    const MAX: Self = Self(0); 
 }
 impl Ord for BidKey {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -40,7 +40,7 @@ impl From<u64> for BidKey {
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 struct AskKey(u64);
 impl OrderKey for AskKey {
-    const MAX: u64 = u64::MAX;
+    const MAX: Self = Self(u64::MAX);
 }
 impl Ord for AskKey {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -179,15 +179,25 @@ impl<Price: OrderKey> AggregatedL2<Price> {
             return;
         } 
         let cursor = self.levels.lower_bound(Bound::Included(&last_level.last_price));
-        let current_amount = *cursor.peek_next.unwrap().1;
-        if let Some(&previous_price, _) = *cursor.peek_previous.unwrap() {
+        let current_amount = *cursor.peek_next().unwrap().1;
+        if let Some((&previous_price, _)) = cursor.peek_prev() {
             last_level.total_amount -= current_amount;
             last_level.last_price = previous_price;
         }
         else {
             debug_assert!(last_level.total_amount == current_amount);
-            self.aggregated_levels.pop_back();
+            self.aggregated_levels.pop();
         }
+    }
+    fn try_update_max_depth_price(self: &mut Self) {
+        // invariant: был добавлен элемент СЛЕВА от self.max_depth_price 
+        let has_cut_by_depth = self.max_depth_price != Price::MAX;
+        if !has_cut_by_depth {
+            return;
+        }
+        let cursor = self.levels.lower_bound(Bound::Included(&self.max_depth_price));
+        debug_assert!(*cursor.peek_next().unwrap().0 == self.max_depth_price);
+        self.max_depth_price = *cursor.peek_prev().unwrap().0;
     }
     fn add_quote(
         self: &mut Self, 
@@ -203,40 +213,32 @@ impl<Price: OrderKey> AggregatedL2<Price> {
             }
             return;
         }
+        self.levels.insert(price, amount);
 
-        // обнови max_depth_price, что все поля коррект
-        // надо добавить в levels
         match self.aggregated_levels.binary_search_by(|level| level.last_price.cmp(&price)) {
             Ok(index) => {
                 self.aggregated_levels[index].total_amount += amount;
-                //return;
+                return;
             }
-            Err(index) => {
-                // ещё depth_price надо подвинуть
-                if index > self.aggregated_levels.len() {
-                    // ...
+            Err(mut index) => {
+                if index == self.aggregated_levels.len() {
+                    if price > self.max_depth_price {
+                        return;
+                    }
+                    debug_assert!(self.max_depth_price == Price::MAX);
+                    if self.levels.len() == self.aggregation_table.max_depth {
+                        self.max_depth_price = price;
+                    }
+                    index -= 1;
+                    self.aggregated_levels[index].last_price = price;    
+                }
+                else {
+                    self.try_cut_by_max_depth();
                 }
                 self.aggregated_levels[index].total_amount += amount;
-                
-                
+                self.try_propogate_amount_surplus(index);   
             }
         }
-        /*if Some(index)
-        unwrap_or_else(|e| e);
-        if pos > levels.size() {
-            --pos;
-            // hz перечитай
-        }
-        
-        let key: K = price.into();
-        if is_add {
-            *book.entry(key).or_insert(0.0) += size;
-        } else if let Some(total_size) = book.get_mut(&key) {
-            *total_size -= size;
-            if *total_size <= 0.0 {
-                book.remove(&key);
-            }
-        }*/
     }
 
 }
