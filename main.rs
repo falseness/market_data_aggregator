@@ -135,6 +135,11 @@ struct AggregatedL2<Price: OrderKey> {
 
 // проверь книгу на пустоту
 impl<Price: OrderKey> AggregatedL2<Price> {
+    fn does_level_have_surplus(self: &Self, 
+        index: usize, cursor_to_last_element: &std::collections::btree_map::Cursor<Price, Amount>) -> bool {
+        return self.aggregated_levels[index].total_amount - cursor_to_last_element.peek_next().unwrap().1 >= self.aggregation_table.get_amount(index);
+    }
+
     fn try_propogate_amount_surplus(
         self: &mut Self, 
         index: usize
@@ -142,23 +147,47 @@ impl<Price: OrderKey> AggregatedL2<Price> {
         // invariant: уже добавили всё тут в levels
         let mut cursor = self.levels.lower_bound(Bound::Included(&self.aggregated_levels[index].last_price));
         debug_assert!(*cursor.peek_next().unwrap().0 == self.aggregated_levels[index].last_price);
-        while self.aggregated_levels[index].total_amount - cursor.peek_next().unwrap().1 >= self.aggregation_table.get_amount(index) {
+        
+        if !self.does_level_have_surplus(index, &cursor) {
+            return;
+        }
+        while true {
+            let (&price, &amount) = cursor.peek_next().unwrap();
+            // вот ето можно будет удалить, если всё делать в правильном порядке
             if self.aggregated_levels[index].last_price <= self.max_depth_price {
                 if index + 1 > self.aggregated_levels.len() {
-                    let tmp = cursor.peek_next().unwrap();
-                    self.aggregated_levels.push(AggregatedLevel::new(*tmp.0, *tmp.1));
+                    self.aggregated_levels.push(AggregatedLevel::new(price, amount));
                 }
                 else {
-                    self.aggregated_levels[index + 1].total_amount += cursor.peek_next().unwrap().1;
+                    self.aggregated_levels[index + 1].total_amount += amount;
                 }
             }
-            self.aggregated_levels[index].total_amount -= cursor.peek_next().unwrap().1;
+            self.aggregated_levels[index].total_amount -= amount;
             cursor.prev();
             self.aggregated_levels[index].last_price = *cursor.peek_next().unwrap().0;
+            if !self.does_level_have_surplus(index, &cursor) {
+                break;
+            }
+        }
+        self.try_propogate_amount_surplus(index + 1);
+    }
+    fn try_cut_by_max_depth(self: &mut Self) {
+        // invariant: only 1 element difference and max_depth_price is actual
+        let last_level = self.aggregated_levels.last_mut().unwrap();
+        
+        if last_level.last_price <= self.max_depth_price {
+            return;
         } 
-        /*while aggregated_levels[index].total_amount - last_quote_amount >= aggregation_table {
-
-        }*/
+        let cursor = self.levels.lower_bound(Bound::Included(&last_level.last_price));
+        let current_amount = *cursor.peek_next.unwrap().1;
+        if let Some(&previous_price, _) = *cursor.peek_previous.unwrap() {
+            last_level.total_amount -= current_amount;
+            last_level.last_price = previous_price;
+        }
+        else {
+            debug_assert!(last_level.total_amount == current_amount);
+            self.aggregated_levels.pop_back();
+        }
     }
     fn add_quote(
         self: &mut Self, 
