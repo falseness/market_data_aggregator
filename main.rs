@@ -279,7 +279,7 @@ impl<Price: OrderKey> AggregatedL2<Price> {
             }
         }
     }
-    fn try_propogate_shortage(self: &mut Self, index: usize) {
+    fn try_propogate_shortage(self: &mut Self, mut index: usize) {
         // удали total_amount == 0 с конца
         
         if self.aggregated_levels[index].total_amount >= self.aggregation_table.get_amount(index) {
@@ -290,21 +290,33 @@ impl<Price: OrderKey> AggregatedL2<Price> {
         debug_assert!(*cursor.peek_next().unwrap().0 == self.aggregated_levels[index].last_price);
         
         cursor.next();
+
+        let mut index_to_steal_quotes = index + 1;
         while let Some((&price, &amount)) = cursor.peek_next() {
             if price > self.max_depth_price {
                 return;
             }
             self.aggregated_levels[index].last_price = price;
             self.aggregated_levels[index].total_amount += amount;
-            if index + 1 < self.aggregated_levels.len() {
-                self.aggregated_levels[index + 1].total_amount -= amount;
-            }
-            if self.aggregated_levels[index].total_amount >= self.aggregation_table.get_amount(index) {
-                if index + 1 < self.aggregated_levels.len() {
-                    self.try_propogate_shortage(index + 1)
+            if index_to_steal_quotes < self.aggregated_levels.len() {
+                self.aggregated_levels[index_to_steal_quotes].total_amount -= amount;
+                if self.aggregated_levels[index_to_steal_quotes].total_amount == 0 {
+                    index_to_steal_quotes += 1;
                 }
+            }
+            if self.aggregated_levels[index].total_amount < self.aggregation_table.get_amount(index) {
+                cursor.next();
+                continue;
+            }
+            if index + 1 >= self.aggregated_levels.len() {
                 return;
             }
+            if self.aggregated_levels[index + 1].total_amount != 0 {
+                self.try_propogate_shortage(index + 1);
+                return;
+            }
+            debug_assert!(index_to_steal_quotes > index + 1);
+            index += 1;
             cursor.next();
         }
     }
