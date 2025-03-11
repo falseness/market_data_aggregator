@@ -200,6 +200,31 @@ impl<Price: OrderKey> AggregatedL2<Price> {
         debug_assert!(*cursor.peek_next().unwrap().0 == self.max_depth_price);
         self.max_depth_price = *cursor.peek_prev().unwrap().0;
     }
+
+    fn try_update_max_depth_price_remove_quote(self: &mut Self) {
+        // invariant: был УДАЛЕН элемент СЛЕВА от self.max_depth_price 
+        let has_cut_by_depth = self.max_depth_price != Price::MAX;
+        if !has_cut_by_depth {
+            return;
+        }
+        let mut cursor = self.levels.lower_bound(Bound::Included(&self.max_depth_price));
+        debug_assert!(*cursor.peek_next().unwrap().0 == self.max_depth_price);
+        cursor.next();
+        if let Some((&price, &amount)) = cursor.peek_next() {
+            self.max_depth_price = price;
+            let index = self.aggregated_levels.len() - 1;
+            if self.aggregated_levels[index].total_amount < self.aggregation_table.get_amount(index) {
+                self.aggregated_levels[index].last_price = price;
+                self.aggregated_levels[index].total_amount += amount;
+            }
+            else {
+                self.aggregated_levels.push(AggregatedLevel::new(price, amount));
+            }
+        }
+        else {
+            self.max_depth_price = Price::MAX;
+        }
+    }
     // удали нули из aggregation_table
     fn add_quote(
         self: &mut Self, 
@@ -290,8 +315,8 @@ impl<Price: OrderKey> AggregatedL2<Price> {
         debug_assert!(*current_amount >= amount);
         *current_amount -= amount;
 
-
-        let should_remove_quote = match self.levels.entry(price) {
+        let should_remove_quote = *current_amount == 0;
+        /*let should_remove_quote = match self.levels.entry(price) {
             std::collections::btree_map::Entry::Occupied(mut entry) => {
                 let value = entry.get_mut();
                 *value -= amount;
@@ -304,7 +329,7 @@ impl<Price: OrderKey> AggregatedL2<Price> {
             std::collections::btree_map::Entry::Vacant(_) => {
                 panic!("incorrect request in remove_quote!");
             }
-        };
+        };*/
 
         match self.aggregated_levels.binary_search_by(|level| level.last_price.cmp(&price)) {
             Ok(index) => 'block: {
@@ -312,6 +337,9 @@ impl<Price: OrderKey> AggregatedL2<Price> {
                 
                 self.try_propogate_shortage(index);
                 if !should_remove_quote {
+                    if self.aggregated_levels.last().unwrap().total_amount == 0 {
+                        self.aggregated_levels.pop();
+                    }
                     break 'block;
                 }
                 // last_price был обновлен элементами справа
@@ -341,8 +369,8 @@ impl<Price: OrderKey> AggregatedL2<Price> {
                     self.aggregated_levels.pop();
                 }
             }
-        }
-        
+        };
+        self.levels.remove(&price);
     }
 
 }
