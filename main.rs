@@ -184,6 +184,9 @@ impl<Price: OrderKey> AggregatedL2<Price> {
         if let Some((&previous_price, _)) = cursor.peek_prev() {
             last_level.total_amount -= current_amount;
             last_level.last_price = previous_price;
+            if last_level.total_amount == 0 {
+                self.aggregated_levels.pop();
+            }
         }
         else {
             debug_assert!(last_level.total_amount == current_amount);
@@ -249,6 +252,12 @@ impl<Price: OrderKey> AggregatedL2<Price> {
             }
         };
 
+        if is_price_new && price < self.max_depth_price {
+            self.try_update_max_depth_price();
+            self.try_cut_by_max_depth();
+        }
+        
+        
         match self.aggregated_levels.binary_search_by(|level| level.last_price.cmp(&price)) {
             Ok(index) => {
                 self.aggregated_levels[index].total_amount += amount;
@@ -269,10 +278,6 @@ impl<Price: OrderKey> AggregatedL2<Price> {
                     self.aggregated_levels[index].last_price = price;    
                 }
                 else {
-                    if is_price_new {
-                        self.try_update_max_depth_price();
-                    }
-                    self.try_cut_by_max_depth();
                 }
                 self.aggregated_levels[index].total_amount += amount;
                 self.try_propogate_amount_surplus(index);   
@@ -343,6 +348,9 @@ impl<Price: OrderKey> AggregatedL2<Price> {
             }
         };*/
 
+        if price < self.max_depth_price {
+            self.try_update_max_depth_price_remove_quote()
+        }
         match self.aggregated_levels.binary_search_by(|level| level.last_price.cmp(&price)) {
             Ok(index) => 'block: {
                 self.aggregated_levels[index].total_amount -= amount;
