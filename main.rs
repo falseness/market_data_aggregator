@@ -1,4 +1,5 @@
 #![feature(btree_cursors)]
+#![feature(map_try_insert)]
 
 use std::borrow::Borrow;
 use std::collections::BTreeMap;
@@ -199,6 +200,7 @@ impl<Price: OrderKey> AggregatedL2<Price> {
         debug_assert!(*cursor.peek_next().unwrap().0 == self.max_depth_price);
         self.max_depth_price = *cursor.peek_prev().unwrap().0;
     }
+    // удали нули из aggregation_table
     fn add_quote(
         self: &mut Self, 
         price: Price, 
@@ -213,7 +215,14 @@ impl<Price: OrderKey> AggregatedL2<Price> {
             }
             return;
         }
-        self.levels.insert(price, amount);
+        // тут сложнее же, чем insert???
+        let is_price_new = match self.levels.try_insert(price, amount) {
+            Ok(_) => true,
+            Err(entry) => {
+                *entry.entry.into_mut() += amount;
+                false
+            }
+        };
 
         match self.aggregated_levels.binary_search_by(|level| level.last_price.cmp(&price)) {
             Ok(index) => {
@@ -226,17 +235,86 @@ impl<Price: OrderKey> AggregatedL2<Price> {
                         return;
                     }
                     debug_assert!(self.max_depth_price == Price::MAX);
+                    
                     if self.levels.len() == self.aggregation_table.max_depth {
+                        debug_assert!(is_price_new);
                         self.max_depth_price = price;
                     }
                     index -= 1;
                     self.aggregated_levels[index].last_price = price;    
                 }
                 else {
+                    if is_price_new {
+                        self.try_update_max_depth_price();
+                    }
                     self.try_cut_by_max_depth();
                 }
                 self.aggregated_levels[index].total_amount += amount;
                 self.try_propogate_amount_surplus(index);   
+            }
+        }
+    }
+    fn try_propogate_shortage(self: &mut Self, index: usize) {
+        // удали total_amount == 0 с конца
+        
+        if self.aggregated_levels[index].total_amount >= self.aggregation_table.get_amount(index) {
+            return;
+        } 
+        // пока верим, что есть такой элемент в btreemap
+        let mut cursor = self.levels.lower_bound(Bound::Included(&self.aggregated_levels[index].last_price));
+        debug_assert!(*cursor.peek_next().unwrap().0 == self.aggregated_levels[index].last_price);
+        
+        cursor.next();
+        while let Some((&price, &amount)) = cursor.peek_next() {
+            if price > self.max_depth_price {
+                return;
+            }
+            self.aggregated_levels[index].last_price = price;
+            self.aggregated_levels[index].total_amount += amount;
+            if index + 1 < self.aggregated_levels.len() {
+                self.aggregated_levels[index + 1].total_amount -= amount;
+            }
+            if self.aggregated_levels[index].total_amount >= self.aggregation_table.get_amount(index) {
+                if index + 1 < self.aggregated_levels.len() {
+                    self.try_propogate_shortage(index + 1)
+                }
+                return;
+            }
+            cursor.next();
+        }
+    }
+    fn remove_quote(self: &mut Self, 
+        price: Price, 
+        amount: Amount) {
+        let mut current_amount = self.levels.get_mut(&price).unwrap();
+        debug_assert!(*current_amount >= amount);
+        *current_amount -= amount;
+
+
+        let removed_quote = match self.levels.entry(price) {
+            std::collections::btree_map::Entry::Occupied(mut entry) => {
+                let value = entry.get_mut();
+                *value -= amount;
+                if *value == 0 {
+                    entry.remove();
+                    true
+                }
+                else {false}
+            }
+            std::collections::btree_map::Entry::Vacant(_) => {
+                panic!("incorrect request in remove_quote!");
+                false
+            }
+        };
+
+        match self.aggregated_levels.binary_search_by(|level| level.last_price.cmp(&price)) {
+            Ok(index) => {
+                
+                return;
+            }
+            Err(mut index) => {
+                self.aggregated_levels[index].total_amount -= amount;
+                self.try_propogate_shortage(index);
             }
         }
     }
