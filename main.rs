@@ -291,32 +291,58 @@ impl<Price: OrderKey> AggregatedL2<Price> {
         *current_amount -= amount;
 
 
-        let removed_quote = match self.levels.entry(price) {
+        let should_remove_quote = match self.levels.entry(price) {
             std::collections::btree_map::Entry::Occupied(mut entry) => {
                 let value = entry.get_mut();
                 *value -= amount;
                 if *value == 0 {
-                    entry.remove();
+                    //entry.remove();
                     true
                 }
                 else {false}
             }
             std::collections::btree_map::Entry::Vacant(_) => {
                 panic!("incorrect request in remove_quote!");
-                false
             }
         };
 
         match self.aggregated_levels.binary_search_by(|level| level.last_price.cmp(&price)) {
-            Ok(index) => {
+            Ok(index) => 'block: {
+                self.aggregated_levels[index].total_amount -= amount;
                 
-                return;
+                self.try_propogate_shortage(index);
+                if !should_remove_quote {
+                    break 'block;
+                }
+                // last_price был обновлен элементами справа
+                if self.aggregated_levels[index].last_price != price {
+                    if self.aggregated_levels.last().unwrap().total_amount == 0 {
+                        self.aggregated_levels.pop();
+                    }
+                    break 'block;
+                }
+                let cursor = self.levels.lower_bound(Bound::Included(&self.aggregated_levels[index].last_price));
+                debug_assert!(*cursor.peek_next().unwrap().0 == self.aggregated_levels[index].last_price);
+                if let Some((&price, _)) = cursor.peek_prev() {
+                    self.aggregated_levels[index].last_price = price;
+                }
+                else {
+                    debug_assert!(index + 1 == self.aggregated_levels.len());
+                    self.aggregated_levels.pop();
+                }
             }
-            Err(mut index) => {
+            Err(index) => 'block: {
+                if index == self.aggregated_levels.len() {
+                    break 'block;
+                }
                 self.aggregated_levels[index].total_amount -= amount;
                 self.try_propogate_shortage(index);
+                if self.aggregated_levels.last().unwrap().total_amount == 0 {
+                    self.aggregated_levels.pop();
+                }
             }
         }
+        
     }
 
 }
