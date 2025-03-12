@@ -252,10 +252,7 @@ impl<Price: OrderKey> AggregatedL2<Price> {
             }
         };
 
-        if is_price_new && price < self.max_depth_price {
-            self.try_update_max_depth_price();
-            self.try_cut_by_max_depth();
-        }
+        
         
         
         match self.aggregated_levels.binary_search_by(|level| level.last_price.cmp(&price)) {
@@ -276,10 +273,17 @@ impl<Price: OrderKey> AggregatedL2<Price> {
                     }
                     index -= 1;
                     self.aggregated_levels[index].last_price = price;    
+                    self.aggregated_levels[index].total_amount += amount;
                 }
                 else {
+                    self.aggregated_levels[index].total_amount += amount;
+                    if is_price_new {
+                        debug_assert!(price < self.max_depth_price);
+                        self.try_update_max_depth_price();
+                        self.try_cut_by_max_depth();
+                    }
                 }
-                self.aggregated_levels[index].total_amount += amount;
+                
                 self.try_propogate_amount_surplus(index);   
             }
         }
@@ -348,7 +352,7 @@ impl<Price: OrderKey> AggregatedL2<Price> {
             }
         };*/
 
-        if price < self.max_depth_price {
+        if should_remove_quote && price < self.max_depth_price  {
             self.try_update_max_depth_price_remove_quote()
         }
         match self.aggregated_levels.binary_search_by(|level| level.last_price.cmp(&price)) {
@@ -371,6 +375,12 @@ impl<Price: OrderKey> AggregatedL2<Price> {
                 }
                 let cursor = self.levels.lower_bound(Bound::Included(&self.aggregated_levels[index].last_price));
                 debug_assert!(*cursor.peek_next().unwrap().0 == self.aggregated_levels[index].last_price);
+                
+                if self.aggregated_levels[index].total_amount == 0 {
+                    debug_assert!(index + 1 == self.aggregated_levels.len());
+                    self.aggregated_levels.pop();
+                    break 'block;
+                } 
                 if let Some((&price, _)) = cursor.peek_prev() {
                     self.aggregated_levels[index].last_price = price;
                 }
