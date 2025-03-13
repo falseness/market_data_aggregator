@@ -9,10 +9,34 @@ use std::ops::Bound;
 
 
 /// Generic trait for order keys (BidKey and AskKey)
-trait OrderKey: Ord + Eq + Copy + std::fmt::Debug {
+trait OrderKey: Ord + Eq + Copy + std::fmt::Debug + From<u64> {
     const MAX: Self;
 }
+/*
+impl From<u64> for AskKey {
+    fn from(value: u64) -> Self {
+        Self(value)
+    }
+}
 
+impl From<u64> for BidKey {
+    fn from(value: u64) -> Self {
+        Self(value)
+    }
+}*/
+
+impl From<AskKey> for u64 {
+    fn from(order_key: AskKey) -> Self {
+        order_key.0
+    }
+}
+
+
+impl From<BidKey> for u64 {
+    fn from(order_key: BidKey) -> Self {
+        order_key.0
+    }
+}
 
 
 /// Bid key (sorted descending)
@@ -97,7 +121,7 @@ impl AggregatedLevel<Price: OrderKey> {
     }
 }*/
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 struct AggregatedLevel<Price: OrderKey> {
     last_price: Price,
     total_amount: Amount
@@ -126,6 +150,20 @@ impl AggregationTable {
         }
         return self.minimum_amounts[index];
     }
+    fn new(minimum_amounts: Vec<Amount>,
+        fallback: Amount,
+        max_depth: usize) -> Self {
+
+        assert!(minimum_amounts.iter().all(|&x| x > 0));
+        assert!(fallback > 0);
+        assert!(max_depth > 0);
+        
+        return Self {
+            minimum_amounts,
+            fallback,
+            max_depth
+        }
+    }
 }
 
 struct AggregatedL2<Price: OrderKey> {
@@ -136,7 +174,8 @@ struct AggregatedL2<Price: OrderKey> {
 }
 
 // проверь книгу на пустоту
-impl<Price: OrderKey> AggregatedL2<Price> {
+impl<Price: OrderKey> AggregatedL2<Price> 
+where u64: From<Price>, Price: From<u64> {
     fn does_level_have_surplus(self: &Self, 
         index: usize, cursor_to_last_element: &std::collections::btree_map::Cursor<Price, Amount>) -> bool {
         return self.aggregated_levels[index].total_amount - cursor_to_last_element.peek_next().unwrap().1 >= self.aggregation_table.get_amount(index);
@@ -233,7 +272,6 @@ impl<Price: OrderKey> AggregatedL2<Price> {
             self.max_depth_price = Price::MAX;
         }
     }
-    // удали нули из aggregation_table
     fn add_quote(
         self: &mut Self, 
         price: Price, 
@@ -248,7 +286,6 @@ impl<Price: OrderKey> AggregatedL2<Price> {
             }
             return;
         }
-        // тут сложнее же, чем insert???
         let is_price_new = match self.levels.try_insert(price, amount) {
             Ok(_) => true,
             Err(entry) => {
@@ -294,12 +331,10 @@ impl<Price: OrderKey> AggregatedL2<Price> {
         }
     }
     fn try_propogate_shortage(self: &mut Self, mut index: usize) {
-        // удали total_amount == 0 с конца
-        
+        // There may be levels with total_amount == 0 after the method execution
         if self.aggregated_levels[index].total_amount >= self.aggregation_table.get_amount(index) {
             return;
         } 
-        // пока верим, что есть такой элемент в btreemap
         let mut cursor = self.levels.lower_bound(Bound::Included(&self.aggregated_levels[index].last_price));
         debug_assert!(*cursor.peek_next().unwrap().0 == self.aggregated_levels[index].last_price);
         
@@ -409,12 +444,6 @@ impl<Price: OrderKey> AggregatedL2<Price> {
             self.levels.remove(&price);
         }
     }
-    fn print(self: &Self) {
-        println!("Another print");
-        println!("{:?}", self.levels);
-
-        println!("{:?}\n", self.aggregated_levels);
-    }
     fn new(table: AggregationTable) -> Self {
         Self {
             levels: BTreeMap::new(),
@@ -424,8 +453,9 @@ impl<Price: OrderKey> AggregatedL2<Price> {
         }
     }
     fn set_quote(self: &mut Self, 
-        price: Price, 
+        price_: u64, 
         new_amount: Amount) {
+        let price = Price::from(price_);
         if let Some(&current_amount) = self.levels.get(&price) {
             match new_amount.cmp(&current_amount) {
                 std::cmp::Ordering::Greater => self.add_quote(price, new_amount - current_amount),
@@ -447,6 +477,10 @@ impl<Price: OrderKey> AggregatedL2<Price> {
     fn get_aggregated_levels(&self) -> &Vec<AggregatedLevel<Price>>{
         return &self.aggregated_levels;
     }
+    fn get_aggregated_levels_tuples(&self) -> Vec<(u64, u64)> {
+        let mut result_clone = self.aggregated_levels.clone();
+        result_clone.into_iter().map(|level| (level.last_price.into(), level.total_amount)).collect()
+    }
 }
 
 struct SlowAggregatedL2ForTests<Price: OrderKey> {
@@ -456,7 +490,9 @@ struct SlowAggregatedL2ForTests<Price: OrderKey> {
     aggregation_table: AggregationTable
 }
 
-impl<Price: OrderKey> SlowAggregatedL2ForTests<Price> {
+
+impl<Price: OrderKey> SlowAggregatedL2ForTests<Price>
+where Price: From<u64>  {
     fn new(table: AggregationTable) -> Self {
         Self {
             levels: BTreeMap::new(),
@@ -466,8 +502,9 @@ impl<Price: OrderKey> SlowAggregatedL2ForTests<Price> {
         }
     }
     fn set_quote(self: &mut Self, 
-        price: Price, 
+        price_: u64, 
         new_amount: Amount) {
+        let price = Price::from(price_);
         match self.levels.try_insert(price, new_amount) {
             Ok(_) => {
                 if new_amount == 0 {
@@ -524,47 +561,89 @@ impl<Price: OrderKey> SlowAggregatedL2ForTests<Price> {
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_from_problem_statement() {
+        let table = AggregationTable::new([3, 5, 15].into(), 1, 999);
+        let l2 = [(1, 2), (2, 2), (4, 1), (5, 4), (6, 8), (7, 10)];
+        
+        let mut solution = AggregatedL2::<AskKey>::new(table);
+        for (price, amount) in l2 {
+            solution.set_quote(price, amount);
+        }
+        assert_eq!(solution.get_aggregated_levels_tuples(), [(2, 4), (5, 5), (7, 18)]);
+    }
+
+    #[test]
+    fn test_simple_with_removes() {
+        let table = AggregationTable::new([2, 5, 3].into(), 1, 2);
+        let mut solution = AggregatedL2::<AskKey>::new(table);
+        solution.set_quote(1, 2);
+        solution.set_quote(3, 2);
+        solution.set_quote(3, 7);
+        assert_eq!(solution.get_aggregated_levels_tuples(), [(1, 2), (3, 7)]);
+
+        solution.set_quote(2, 4);
+        solution.set_quote(2, 5);
+        assert_eq!(solution.get_aggregated_levels_tuples(), [(1, 2), (2, 5)]);
+        solution.set_quote(3, 1);
+        solution.set_quote(1, 0);
+        assert_eq!(solution.get_aggregated_levels_tuples(), [(2, 5), (3, 1)]);
+        solution.set_quote(2, 1);
+        assert_eq!(solution.get_aggregated_levels_tuples(), [(3, 2)]);
+    }
+
+    use std::any::type_name;
+
+    fn run_stress<Price: OrderKey>()
+    where u64: From<Price> {
+        let table = AggregationTable::new(vec![2, 6, 15, 8, 80], 12, 30);
+        let mut fast_solution = AggregatedL2::<Price>::new(table.clone());
+        let mut slow_solution = SlowAggregatedL2ForTests::<Price>::new(table.clone());
+        
+        let mut rng = ChaCha8Rng::seed_from_u64(0);;
+        
+        let iterations_count = 1e5 as i32;
+        for i in 0..iterations_count {
+            let price = rng.gen_range(1..=42);
+
+            let mut amount: u64 = rng.gen_range(0..=17);
+            if rng.gen_range(0..=100) == 0 { 
+                amount = 0;
+            }
+
+            fast_solution.set_quote(price, amount);
+            slow_solution.set_quote(price, amount);
+
+            assert!(*fast_solution.get_levels() == *slow_solution.get_levels());
+            assert!(*fast_solution.get_aggregated_levels() == *slow_solution.get_aggregated_levels());
+            assert!(fast_solution.get_max_depth_price() == slow_solution.get_max_depth_price());
+            
+            if i % (iterations_count / 10) == 0 {
+                eprintln!("{} OK {} set_quotes", type_name::<Price>(), i);
+            }
+        }
+        eprintln!("Passed stress ^_^ for {}", type_name::<Price>());
+    }
+
+
+    #[test]
+    fn test_stress_ask() {
+        run_stress::<AskKey>(); 
+    }
+
+    #[test]
+    fn test_stress_bid() {
+        run_stress::<BidKey>(); 
+    }
+
+}
+
 fn main() {
     println!("Hello world");
-    let table = AggregationTable{minimum_amounts: vec![2, 6, 15, 8, 80], fallback: 12, max_depth: 30};
-    let mut fast_solution = AggregatedL2::<AskKey>::new(table.clone());
-    let mut slow_solution = SlowAggregatedL2ForTests::<AskKey>::new(table.clone());
-    
-    let mut rng = ChaCha8Rng::seed_from_u64(0);;
-    
-    for i in 0..100000 {
-        let price = AskKey(rng.gen_range(1..=42));
-
-        let mut amount: u64 = rng.gen_range(0..=17);
-        if rng.gen_range(0..=100) == 0 { 
-            amount = 0;
-        }
-
-        fast_solution.set_quote(price, amount);
-        slow_solution.set_quote(price, amount);
-
-
-        println!("set_quote {} {}", price.0, amount);
-        
-
-        assert!(*fast_solution.get_levels() == *slow_solution.get_levels());
-
-
-        if *fast_solution.get_aggregated_levels() != *slow_solution.get_aggregated_levels() {
-            println!("Fast: ");
-            println!("{:?}", *fast_solution.get_levels());
-            println!("{:?}", *fast_solution.get_aggregated_levels());
-
-            println!("Slow: ");
-            println!("{:?}", *slow_solution.get_levels());
-            println!("{:?}", *slow_solution.get_aggregated_levels());
-        }
-        
-        assert!(*fast_solution.get_aggregated_levels() == *slow_solution.get_aggregated_levels());
-        assert!(fast_solution.get_max_depth_price() == slow_solution.get_max_depth_price());
-        println!("ok {}", i);
-    }
-    println!("Passed all tests");
     
     /*
     result.set_quote(AskKey(1), 2);
