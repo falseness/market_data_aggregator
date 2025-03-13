@@ -85,24 +85,6 @@ impl PartialOrd for AskKey {
 }
 
 
-struct BidSide {
-
-}
-struct AskSide {}
-
-
-trait Side {
-    type PriceKey;
-}
-
-impl Side for BidSide {
-    type PriceKey = BidKey;
-}
-
-impl Side for AskSide {
-    type PriceKey = AskKey;
-}
-
 type Amount = u64;
 /*
 struct AggregatedLevel<Price: OrderKey> {
@@ -596,8 +578,6 @@ mod tests {
         assert_eq!(solution.get_aggregated_levels_tuples(), [(3, 2)]);
     }
 
-    use std::any::type_name;
-
     fn run_stress<Price: OrderKey>()
     where u64: From<Price> {
         let table = AggregationTable::new(vec![2, 6, 15, 8, 80], 12, 30);
@@ -606,8 +586,7 @@ mod tests {
         
         let mut rng = ChaCha8Rng::seed_from_u64(0);;
         
-        let iterations_count = 1e5 as i32;
-        for i in 0..iterations_count {
+        for i in 0..100000 {
             let price = rng.gen_range(1..=42);
 
             let mut amount: u64 = rng.gen_range(0..=17);
@@ -621,12 +600,7 @@ mod tests {
             assert!(*fast_solution.get_levels() == *slow_solution.get_levels());
             assert!(*fast_solution.get_aggregated_levels() == *slow_solution.get_aggregated_levels());
             assert!(fast_solution.get_max_depth_price() == slow_solution.get_max_depth_price());
-            
-            if i % (iterations_count / 10) == 0 {
-                eprintln!("{} OK {} set_quotes", type_name::<Price>(), i);
-            }
         }
-        eprintln!("Passed stress ^_^ for {}", type_name::<Price>());
     }
 
 
@@ -642,7 +616,69 @@ mod tests {
 
 }
 
+use serde::{Deserialize, Serialize};
+use std::fs::File;
+use std::io::{BufRead, BufReader};
+use serde_json::Result;
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "PascalCase")] // Ensure consistent casing if needed
+enum Side {
+    Bid,
+    Ask,
+}
+
+
+#[derive(Debug, Deserialize, Serialize)]
+struct Trade {
+    platform_time: u64,
+    exchange_time: u64,
+    seq_no: Option<u64>,  // Nullable sequence number
+    side: Side,         // "Bid" or "Ask"
+    price: f64,
+    amount: f64,
+    is_eot: bool,
+}
+
+fn is_integer(num: f64) -> bool {
+    (num.round() - num).abs() < 1e-5
+}
+
 fn main() {
+    let file = File::open("l2.json").expect("Cannot open file");
+    let reader = BufReader::new(file);
+
+    let table = AggregationTable::new(vec![1e12 as u64, 2e12 as u64, 1e13 as u64, 1e10 as u64], 1e12 as u64, 50);
+    //let mut fast_solution = AggregatedL2::<Price>::new(table.clone());
+    //let mut slow_solution = SlowAggregatedL2ForTests::<Price>::new(table.clone());
+    let mut solution_for_ask = AggregatedL2::<AskKey>::new(table.clone());
+    let mut solution_for_bid = AggregatedL2::<BidKey>::new(table.clone());
+    
+    let ratio: f64 = 1e8;
+
+    for line in reader.lines() {
+        let line = line.expect("Error reading line");
+        let trade: Trade = serde_json::from_str(&line).expect("Invalid JSON format");
+        
+        let price = (trade.price * ratio).round() as u64;
+        let amount = (trade.amount * ratio).round() as u64;
+        assert!(is_integer(trade.price * ratio));
+        assert!(is_integer(trade.amount * ratio));
+
+
+        match trade.side {
+            Side::Bid => solution_for_bid.set_quote(price, amount),
+            Side::Ask => solution_for_ask.set_quote(price, amount),
+        }
+        if solution_for_bid.get_levels().is_empty() || solution_for_ask.get_levels().is_empty() {
+            continue;
+        } 
+        let ask = u64::from(*solution_for_ask.get_levels().first_key_value().unwrap().0);
+        let bid = u64::from(*solution_for_bid.get_levels().first_key_value().unwrap().0);
+        assert!(ask > bid);
+        
+    }
+    
     println!("Hello world");
     
     /*
