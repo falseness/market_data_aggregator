@@ -9,7 +9,7 @@ use std::ops::Bound;
 
 
 /// Generic trait for order keys (BidKey and AskKey)
-trait OrderKey: Ord + Eq + Copy {
+trait OrderKey: Ord + Eq + Copy + std::fmt::Debug {
     const MAX: Self;
 }
 
@@ -97,6 +97,7 @@ impl AggregatedLevel<Price: OrderKey> {
     }
 }*/
 
+#[derive(Debug)]
 struct AggregatedLevel<Price: OrderKey> {
     last_price: Price,
     total_amount: Amount
@@ -156,7 +157,7 @@ impl<Price: OrderKey> AggregatedL2<Price> {
             let (&price, &amount) = cursor.peek_next().unwrap();
             // вот ето можно будет удалить, если всё делать в правильном порядке
             if self.aggregated_levels[index].last_price <= self.max_depth_price {
-                if index + 1 > self.aggregated_levels.len() {
+                if index + 1 == self.aggregated_levels.len() {
                     self.aggregated_levels.push(AggregatedLevel::new(price, amount));
                 }
                 else {
@@ -400,9 +401,148 @@ impl<Price: OrderKey> AggregatedL2<Price> {
                 }
             }
         };
-        self.levels.remove(&price);
+        if should_remove_quote {
+            self.levels.remove(&price);
+        }
+    }
+    fn print(self: &Self) {
+        println!("Another print");
+        println!("{:?}", self.levels);
+
+        println!("{:?}\n", self.aggregated_levels);
+    }
+    fn new(table: AggregationTable) -> Self {
+        Self {
+            levels: BTreeMap::new(),
+            max_depth_price: Price::MAX,
+            aggregated_levels: Vec::new(),
+            aggregation_table: table,
+        }
+    }
+    fn set_quote(self: &mut Self, 
+        price: Price, 
+        new_amount: Amount) {
+        if let Some(&current_amount) = self.levels.get(&price) {
+            match new_amount.cmp(&current_amount) {
+                std::cmp::Ordering::Greater => self.add_quote(price, new_amount - current_amount),
+                std::cmp::Ordering::Less => self.remove_quote(price, current_amount - new_amount),
+                std::cmp::Ordering::Equal => (),
+            }
+        } 
+        else {
+            self.add_quote(price, new_amount);
+        }
+    }
+    fn get_levels(&self) -> &BTreeMap<Price, Amount>{
+        return &self.levels;
     }
 
+    fn get_aggregated_levels(&self) -> &Vec<AggregatedLevel<Price>>{
+        return &self.aggregated_levels;
+    }
+}
+
+struct SlowAggregatedL2ForTests<Price: OrderKey> {
+    levels: BTreeMap<Price, Amount>,
+    aggregated_levels: Vec<AggregatedLevel<Price>>,
+    aggregation_table: AggregationTable
+}
+
+impl<Price: OrderKey> SlowAggregatedL2ForTests<Price> {
+    fn new(table: AggregationTable) -> Self {
+        Self {
+            levels: BTreeMap::new(),
+            aggregated_levels: Vec::new(),
+            aggregation_table: table,
+        }
+    }
+    fn set_quote(self: &mut Self, 
+        price: Price, 
+        new_amount: Amount) {
+        match self.levels.try_insert(price, new_amount) {
+            Ok(_) => (),
+            Err(entry) => {
+                if new_amount == 0 {
+                    entry.entry.remove();  
+                }
+                else {
+                    *entry.entry.into_mut() = 0;
+                }
+            }
+        };
+        self.aggregated_levels.clear();
+        for (index, (&price, &amount)) in self.levels.iter().enumerate() {
+            debug_assert!(amount > 0);
+            if index + 1 > self.aggregation_table.max_depth {
+                break;
+            }
+            if self.aggregated_levels.is_empty() {
+                self.aggregated_levels.push(AggregatedLevel::new(price, amount));
+                continue;
+            }
+            let index = self.aggregated_levels.len() - 1;
+            if self.aggregated_levels[index].total_amount >= self.aggregation_table.get_amount(index) {
+                self.aggregated_levels.push(AggregatedLevel::new(price, amount));
+            }
+            else {
+                self.aggregated_levels[index].last_price = price;
+                self.aggregated_levels[index].total_amount += amount;
+            }
+        }
+    }
+
+    fn get_levels(&self) -> &BTreeMap<Price, Amount>{
+        return &self.levels;
+    }
+
+    fn get_aggregated_levels(&self) -> &Vec<AggregatedLevel<Price>>{
+        return &self.aggregated_levels;
+    }
+}
+
+
+
+
+fn main() {
+    println!("Hello world");
+    let table = AggregationTable{minimum_amounts: vec![2, 5, 3], fallback: 2, max_depth: 10};
+    let mut result = AggregatedL2::<AskKey>::new(table);
+    result.set_quote(AskKey(1), 2);
+    result.print(); 
+    result.set_quote(AskKey(3), 2);
+    result.print(); 
+    result.set_quote(AskKey(3), 7);
+    result.print(); 
+    result.set_quote(AskKey(2), 4);
+    result.print(); 
+    result.set_quote(AskKey(2), 5);
+    result.print();
+    result.set_quote(AskKey(2), 2);
+    result.print();
+    /*
+    let mut order_book = OrderBook::new();
+
+    // Add bids
+    order_book.add(100, 10.0, true);
+    order_book.add(101, 5.0, true);
+    order_book.add(102, 7.0, true);
+    order_book.add(101, 3.0, true); // Merges at price level 101
+
+    // Add asks
+    order_book.add(103, 8.0, false);
+    order_book.add(104, 12.0, false);
+    order_book.add(103, 6.0, false); // Merges at price level 103
+
+    order_book.print_order_book();
+
+    // Get best bid/ask
+    let (best_bid, best_ask) = order_book.best_bid_ask();
+    println!("Best Bid: {:?}, Best Ask: {:?}", best_bid, best_ask);
+
+    // Remove a bid order
+    order_book.remove(101, 5.0, true);
+    println!("\nAfter Removing 5 from 101 Bid:");
+    order_book.print_order_book();*/
 }
 
 
@@ -483,29 +623,3 @@ impl OrderBook {
     }
 }
 */
-fn main() {
-    /*
-    let mut order_book = OrderBook::new();
-
-    // Add bids
-    order_book.add(100, 10.0, true);
-    order_book.add(101, 5.0, true);
-    order_book.add(102, 7.0, true);
-    order_book.add(101, 3.0, true); // Merges at price level 101
-
-    // Add asks
-    order_book.add(103, 8.0, false);
-    order_book.add(104, 12.0, false);
-    order_book.add(103, 6.0, false); // Merges at price level 103
-
-    order_book.print_order_book();
-
-    // Get best bid/ask
-    let (best_bid, best_ask) = order_book.best_bid_ask();
-    println!("Best Bid: {:?}, Best Ask: {:?}", best_bid, best_ask);
-
-    // Remove a bid order
-    order_book.remove(101, 5.0, true);
-    println!("\nAfter Removing 5 from 101 Bid:");
-    order_book.print_order_book();*/
-}
