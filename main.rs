@@ -357,7 +357,7 @@ impl<Price: OrderKey> AggregatedL2<Price> {
             }
         };*/
 
-        if should_remove_quote && price < self.max_depth_price  {
+        if should_remove_quote && price <= self.max_depth_price  {
             self.try_update_max_depth_price_remove_quote()
         }
         match self.aggregated_levels.binary_search_by(|level| level.last_price.cmp(&price)) {
@@ -526,22 +526,23 @@ use rand_chacha::ChaCha8Rng;
 
 fn main() {
     println!("Hello world");
-    let table = AggregationTable{minimum_amounts: vec![2, 5, 15, 8], fallback: 4, max_depth: 10};
+    let table = AggregationTable{minimum_amounts: vec![2, 6, 15, 8, 80], fallback: 12, max_depth: 30};
     let mut fast_solution = AggregatedL2::<AskKey>::new(table.clone());
     let mut slow_solution = SlowAggregatedL2ForTests::<AskKey>::new(table.clone());
     
     let mut rng = ChaCha8Rng::seed_from_u64(0);;
     
-    for i in 0..1000 {
-        let price = AskKey(rng.gen_range(1..=10));
-        let amount: u64 = rng.gen_range(1..=15);
+    for i in 0..100000 {
+        let price = AskKey(rng.gen_range(1..=42));
 
-        
-        if i == 70 {
-            println!("err");
+        let mut amount: u64 = rng.gen_range(0..=17);
+        if rng.gen_range(0..=100) == 0 { 
+            amount = 0;
         }
+
         fast_solution.set_quote(price, amount);
         slow_solution.set_quote(price, amount);
+
 
         println!("set_quote {} {}", price.0, amount);
         
@@ -563,6 +564,7 @@ fn main() {
         assert!(fast_solution.get_max_depth_price() == slow_solution.get_max_depth_price());
         println!("ok {}", i);
     }
+    println!("Passed all tests");
     
     /*
     result.set_quote(AskKey(1), 2);
