@@ -97,7 +97,7 @@ impl AggregatedLevel<Price: OrderKey> {
     }
 }*/
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 struct AggregatedLevel<Price: OrderKey> {
     last_price: Price,
     total_amount: Amount
@@ -112,7 +112,7 @@ impl<Price: OrderKey> AggregatedLevel<Price> {
 }
 
 
-
+#[derive(Clone)]
 struct AggregationTable {
     minimum_amounts: Vec<Amount>,
     fallback: Amount,
@@ -121,7 +121,7 @@ struct AggregationTable {
 
 impl AggregationTable {
     fn get_amount(self: &Self, index: usize) -> Amount {
-        if index > self.minimum_amounts.len() {
+        if index >= self.minimum_amounts.len() {
             return self.fallback;
         }
         return self.minimum_amounts[index];
@@ -198,6 +198,10 @@ impl<Price: OrderKey> AggregatedL2<Price> {
         // invariant: был добавлен элемент СЛЕВА от self.max_depth_price 
         let has_cut_by_depth = self.max_depth_price != Price::MAX;
         if !has_cut_by_depth {
+            // предполагаем, что max_depth != 0
+            if self.levels.len() == self.aggregation_table.max_depth {
+                self.max_depth_price = *self.levels.last_key_value().unwrap().0;
+            }
             return;
         }
         let cursor = self.levels.lower_bound(Bound::Included(&self.max_depth_price));
@@ -362,14 +366,14 @@ impl<Price: OrderKey> AggregatedL2<Price> {
                 
                 self.try_propogate_shortage(index);
                 if !should_remove_quote {
-                    if self.aggregated_levels.last().unwrap().total_amount == 0 {
+                    while !self.aggregated_levels.is_empty() && self.aggregated_levels.last().unwrap().total_amount == 0 {
                         self.aggregated_levels.pop();
                     }
                     break 'block;
                 }
                 // last_price был обновлен элементами справа
                 if self.aggregated_levels[index].last_price != price {
-                    if self.aggregated_levels.last().unwrap().total_amount == 0 {
+                    while !self.aggregated_levels.is_empty() && self.aggregated_levels.last().unwrap().total_amount == 0 {
                         self.aggregated_levels.pop();
                     }
                     break 'block;
@@ -396,7 +400,7 @@ impl<Price: OrderKey> AggregatedL2<Price> {
                 }
                 self.aggregated_levels[index].total_amount -= amount;
                 self.try_propogate_shortage(index);
-                if self.aggregated_levels.last().unwrap().total_amount == 0 {
+                while !self.aggregated_levels.is_empty() && self.aggregated_levels.last().unwrap().total_amount == 0 {
                     self.aggregated_levels.pop();
                 }
             }
@@ -429,9 +433,12 @@ impl<Price: OrderKey> AggregatedL2<Price> {
                 std::cmp::Ordering::Equal => (),
             }
         } 
-        else {
+        else if new_amount != 0 {
             self.add_quote(price, new_amount);
         }
+    }
+    fn get_max_depth_price(&self) -> Price {
+        return self.max_depth_price
     }
     fn get_levels(&self) -> &BTreeMap<Price, Amount>{
         return &self.levels;
@@ -444,6 +451,7 @@ impl<Price: OrderKey> AggregatedL2<Price> {
 
 struct SlowAggregatedL2ForTests<Price: OrderKey> {
     levels: BTreeMap<Price, Amount>,
+    max_depth_price: Price,
     aggregated_levels: Vec<AggregatedLevel<Price>>,
     aggregation_table: AggregationTable
 }
@@ -454,28 +462,34 @@ impl<Price: OrderKey> SlowAggregatedL2ForTests<Price> {
             levels: BTreeMap::new(),
             aggregated_levels: Vec::new(),
             aggregation_table: table,
+            max_depth_price: Price::MAX
         }
     }
     fn set_quote(self: &mut Self, 
         price: Price, 
         new_amount: Amount) {
         match self.levels.try_insert(price, new_amount) {
-            Ok(_) => (),
+            Ok(_) => {
+                if new_amount == 0 {
+                    self.levels.remove(&price);
+                }
+            },
             Err(entry) => {
                 if new_amount == 0 {
                     entry.entry.remove();  
                 }
                 else {
-                    *entry.entry.into_mut() = 0;
+                    *entry.entry.into_mut() = new_amount;
                 }
             }
         };
         self.aggregated_levels.clear();
-        for (index, (&price, &amount)) in self.levels.iter().enumerate() {
+        for (quote_index, (&price, &amount)) in self.levels.iter().enumerate() {
             debug_assert!(amount > 0);
-            if index + 1 > self.aggregation_table.max_depth {
+            if quote_index + 1 > self.aggregation_table.max_depth {
                 break;
             }
+            self.max_depth_price = price;
             if self.aggregated_levels.is_empty() {
                 self.aggregated_levels.push(AggregatedLevel::new(price, amount));
                 continue;
@@ -489,6 +503,13 @@ impl<Price: OrderKey> SlowAggregatedL2ForTests<Price> {
                 self.aggregated_levels[index].total_amount += amount;
             }
         }
+        if self.levels.len() < self.aggregation_table.max_depth {
+            self.max_depth_price = Price::MAX;
+        }
+    }
+
+    fn get_max_depth_price(&self) -> Price {
+        return self.max_depth_price
     }
 
     fn get_levels(&self) -> &BTreeMap<Price, Amount>{
@@ -500,13 +521,50 @@ impl<Price: OrderKey> SlowAggregatedL2ForTests<Price> {
     }
 }
 
-
-
+use rand::{Rng, SeedableRng};
+use rand_chacha::ChaCha8Rng;
 
 fn main() {
     println!("Hello world");
-    let table = AggregationTable{minimum_amounts: vec![2, 5, 3], fallback: 2, max_depth: 10};
-    let mut result = AggregatedL2::<AskKey>::new(table);
+    let table = AggregationTable{minimum_amounts: vec![2, 5, 15, 8], fallback: 4, max_depth: 10};
+    let mut fast_solution = AggregatedL2::<AskKey>::new(table.clone());
+    let mut slow_solution = SlowAggregatedL2ForTests::<AskKey>::new(table.clone());
+    
+    let mut rng = ChaCha8Rng::seed_from_u64(0);;
+    
+    for i in 0..1000 {
+        let price = AskKey(rng.gen_range(1..=10));
+        let amount: u64 = rng.gen_range(1..=15);
+
+        
+        if i == 70 {
+            println!("err");
+        }
+        fast_solution.set_quote(price, amount);
+        slow_solution.set_quote(price, amount);
+
+        println!("set_quote {} {}", price.0, amount);
+        
+
+        assert!(*fast_solution.get_levels() == *slow_solution.get_levels());
+
+
+        if *fast_solution.get_aggregated_levels() != *slow_solution.get_aggregated_levels() {
+            println!("Fast: ");
+            println!("{:?}", *fast_solution.get_levels());
+            println!("{:?}", *fast_solution.get_aggregated_levels());
+
+            println!("Slow: ");
+            println!("{:?}", *slow_solution.get_levels());
+            println!("{:?}", *slow_solution.get_aggregated_levels());
+        }
+        
+        assert!(*fast_solution.get_aggregated_levels() == *slow_solution.get_aggregated_levels());
+        assert!(fast_solution.get_max_depth_price() == slow_solution.get_max_depth_price());
+        println!("ok {}", i);
+    }
+    
+    /*
     result.set_quote(AskKey(1), 2);
     result.print(); 
     result.set_quote(AskKey(3), 2);
@@ -518,7 +576,7 @@ fn main() {
     result.set_quote(AskKey(2), 5);
     result.print();
     result.set_quote(AskKey(2), 2);
-    result.print();
+    result.print();*/
     /*
     let mut order_book = OrderBook::new();
 
