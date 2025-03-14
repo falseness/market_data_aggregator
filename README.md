@@ -2,5 +2,8 @@
 
 
 ```bash
-cargo +nightly build
+cargo +nightly build --release
+./target/release/market_data_aggregator
+
+cargo test
 ```

@@ -644,80 +644,55 @@ fn is_integer(num: f64) -> bool {
     (num.round() - num).abs() < 1e-5
 }
 
+
+use std::time::Instant;
+
+
 fn main() {
     let file = File::open("l2.json").expect("Cannot open file");
     let reader = BufReader::new(file);
 
-    let table = AggregationTable::new(vec![1e12 as u64, 2e12 as u64, 1e13 as u64, 1e10 as u64], 1e12 as u64, 50);
+    let table = AggregationTable::new(vec![1e13 as u64, 2e13 as u64, 1e13 as u64, 1e12 as u64], 1e13 as u64, 100);
     //let mut fast_solution = AggregatedL2::<Price>::new(table.clone());
     //let mut slow_solution = SlowAggregatedL2ForTests::<Price>::new(table.clone());
-    let mut solution_for_ask = AggregatedL2::<AskKey>::new(table.clone());
-    let mut solution_for_bid = AggregatedL2::<BidKey>::new(table.clone());
+    //let mut solution_for_ask = AggregatedL2::<AskKey>::new(table.clone());
+    //let mut solution_for_bid = AggregatedL2::<BidKey>::new(table.clone());
     
     let ratio: f64 = 1e8;
+
+    let mut arr = Vec::<Trade>::new();
 
     for line in reader.lines() {
         let line = line.expect("Error reading line");
         let trade: Trade = serde_json::from_str(&line).expect("Invalid JSON format");
-        
-        let price = (trade.price * ratio).round() as u64;
-        let amount = (trade.amount * ratio).round() as u64;
-        assert!(is_integer(trade.price * ratio));
-        assert!(is_integer(trade.amount * ratio));
-
-
-        match trade.side {
-            Side::Bid => solution_for_bid.set_quote(price, amount),
-            Side::Ask => solution_for_ask.set_quote(price, amount),
-        }
-        if solution_for_bid.get_levels().is_empty() || solution_for_ask.get_levels().is_empty() {
-            continue;
-        } 
-        let ask = u64::from(*solution_for_ask.get_levels().first_key_value().unwrap().0);
-        let bid = u64::from(*solution_for_bid.get_levels().first_key_value().unwrap().0);
-        assert!(ask > bid);
-        
+        arr.push(trade);
     }
     
-    println!("Hello world");
-    
-    /*
-    result.set_quote(AskKey(1), 2);
-    result.print(); 
-    result.set_quote(AskKey(3), 2);
-    result.print(); 
-    result.set_quote(AskKey(3), 7);
-    result.print(); 
-    result.set_quote(AskKey(2), 4);
-    result.print(); 
-    result.set_quote(AskKey(2), 5);
-    result.print();
-    result.set_quote(AskKey(2), 2);
-    result.print();*/
-    /*
-    let mut order_book = OrderBook::new();
+    let start = Instant::now(); // Start timer
+    for i in 0..10000 {
+        let mut solution_for_ask = AggregatedL2::<AskKey>::new(table.clone());
+        let mut solution_for_bid = AggregatedL2::<BidKey>::new(table.clone());
+        for trade in arr.iter() {
+            let price = (trade.price * ratio).round() as u64;
+            let amount = (trade.amount * ratio).round() as u64;
+            assert!(is_integer(trade.price * ratio));
+            assert!(is_integer(trade.amount * ratio));
 
-    // Add bids
-    order_book.add(100, 10.0, true);
-    order_book.add(101, 5.0, true);
-    order_book.add(102, 7.0, true);
-    order_book.add(101, 3.0, true); // Merges at price level 101
 
-    // Add asks
-    order_book.add(103, 8.0, false);
-    order_book.add(104, 12.0, false);
-    order_book.add(103, 6.0, false); // Merges at price level 103
-
-    order_book.print_order_book();
-
-    // Get best bid/ask
-    let (best_bid, best_ask) = order_book.best_bid_ask();
-    println!("Best Bid: {:?}, Best Ask: {:?}", best_bid, best_ask);
-
-    // Remove a bid order
-    order_book.remove(101, 5.0, true);
-    println!("\nAfter Removing 5 from 101 Bid:");
-    order_book.print_order_book();*/
+            match trade.side {
+                Side::Bid => solution_for_bid.set_quote(price, amount),
+                Side::Ask => solution_for_ask.set_quote(price, amount),
+            }
+            if solution_for_bid.get_levels().is_empty() || solution_for_ask.get_levels().is_empty() {
+                continue;
+            } 
+            let ask = u64::from(*solution_for_ask.get_levels().first_key_value().unwrap().0);
+            let bid = u64::from(*solution_for_bid.get_levels().first_key_value().unwrap().0);
+            assert!(ask > bid);
+        }
+    }
+    let duration = start.elapsed(); // Get elapsed time
+    println!("Time taken: {:.2?}", duration);
 }
 
 
