@@ -229,19 +229,20 @@ where
             }
             return;
         }
-        // last_price was not updated by element to the right. so try to update it by previous elements
-        let cursor = self
-            .levels
-            .lower_bound(Bound::Included(&self.aggregated_levels[index].last_price));
-        debug_assert!(
-            *cursor.peek_next().unwrap().0 == self.aggregated_levels[index].last_price
-        );
 
         if self.aggregated_levels[index].total_amount == 0 {
             debug_assert!(index + 1 == self.aggregated_levels.len());
             self.aggregated_levels.pop();
             return;
         }
+        // last_price was not updated by element to the right. so update it by previous element
+        let cursor = self
+            .levels
+            .lower_bound(Bound::Included(&self.aggregated_levels[index].last_price));
+        debug_assert!(
+            *cursor.peek_next().unwrap().0 != self.aggregated_levels[index].last_price
+        );
+
         let (&price, _) = cursor.peek_prev().unwrap();
         self.aggregated_levels[index].last_price = price;
     }
@@ -269,9 +270,6 @@ where
                 }
             }
         };
-        if should_remove_quote {
-            self.levels.remove(&price);
-        }
     }
     pub fn get_max_depth_price(&self) -> Price {
         return self.max_depth_price;
@@ -306,9 +304,12 @@ where
                 *entry.get_mut() = new_amount;
 
                 match new_amount.cmp(&current_amount) {
-                    std::cmp::Ordering::Greater => self.add_quote(price, new_amount - current_amount, false),
+                    std::cmp::Ordering::Greater => self.add_quote(price, new_amount - current_amount, /*is_price_new=*/false),
                     std::cmp::Ordering::Less => {
                         let should_remove_quote = new_amount == 0;
+                        if should_remove_quote {
+                            entry.remove();
+                        }
                         self.remove_quote(price, current_amount - new_amount, should_remove_quote);
                     },
                     std::cmp::Ordering::Equal => (),
