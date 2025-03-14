@@ -105,7 +105,7 @@ where
         if !has_cut_by_depth {
             return;
         }
-        let mut cursor = self
+        let cursor = self
             .levels
             .lower_bound(Bound::Excluded(&self.max_depth_price));
         if let Some((&price, &amount)) = cursor.peek_next() {
@@ -172,7 +172,7 @@ where
                 self.aggregated_levels[index].total_amount += amount;
                 return;
             }
-            Err(mut index) => {
+            Err(index) => {
                 self.add_quote_not_found_in_aggregated_levels(price, amount, is_price_new, index);
             }
         }
@@ -182,7 +182,6 @@ where
         if self.aggregated_levels[index].total_amount >= self.subscription_rules.get_amount(index) {
             return;
         }
-        // may be done faster but with worse readability
         let mut cursor = self
             .levels
             .lower_bound(Bound::Excluded(&self.aggregated_levels[index].last_price));
@@ -216,12 +215,12 @@ where
             index += 1;
         }
     }
-    fn remove_last_quote_in_level(self: &mut Self, price: Price, amount: Amount, should_remove_quote: bool, index: usize) {
+    fn remove_last_quote_in_level(self: &mut Self, price: Price, amount: Amount, has_removed_quote: bool, index: usize) {
         debug_assert!(self.aggregated_levels[index].last_price == price);
         self.aggregated_levels[index].total_amount -= amount;
 
         self.try_propogate_shortage(index);
-        if !should_remove_quote || self.aggregated_levels[index].last_price != price {
+        if !has_removed_quote || self.aggregated_levels[index].last_price != price {
             while !self.aggregated_levels.is_empty()
                 && self.aggregated_levels.last().unwrap().total_amount == 0
             {
@@ -240,14 +239,15 @@ where
             .levels
             .lower_bound(Bound::Included(&self.aggregated_levels[index].last_price));
         debug_assert!(
+            cursor.peek_next().is_none() ||
             *cursor.peek_next().unwrap().0 != self.aggregated_levels[index].last_price
         );
 
         let (&price, _) = cursor.peek_prev().unwrap();
         self.aggregated_levels[index].last_price = price;
     }
-    fn remove_quote(self: &mut Self, price: Price, amount: Amount, should_remove_quote: bool) {
-        if should_remove_quote && price <= self.max_depth_price {
+    fn remove_quote(self: &mut Self, price: Price, amount: Amount, has_removed_quote: bool) {
+        if has_removed_quote && price <= self.max_depth_price {
             self.try_update_max_depth_price_remove_quote()
         }
         match self
@@ -255,11 +255,11 @@ where
             .binary_search_by(|level| level.last_price.cmp(&price))
         {
             Ok(index) => {
-                self.remove_last_quote_in_level(price, amount, should_remove_quote, index);
+                self.remove_last_quote_in_level(price, amount, has_removed_quote, index);
             }
-            Err(index) => 'block: {
+            Err(index) => {
                 if index == self.aggregated_levels.len() {
-                    break 'block;
+                    return;
                 }
                 self.aggregated_levels[index].total_amount -= amount;
                 self.try_propogate_shortage(index);
@@ -292,7 +292,7 @@ where
     fn set_quote(self: &mut Self, price_: u64, new_amount: Amount) {
         let price = Price::from(price_);
 
-        let is_price_new = match self.levels.entry(price) {
+        match self.levels.entry(price) {
             Entry::Vacant(entry) => {
                 if new_amount != 0 {
                     entry.insert(new_amount);
