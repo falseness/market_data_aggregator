@@ -80,7 +80,7 @@ where u64: From<Price>, Price: From<u64> {
         return &self.aggregated_levels;
     }
     fn get_aggregated_levels_tuples(&self) -> Vec<(u64, u64)> {
-        let mut result_clone = self.aggregated_levels.clone();
+        let result_clone = self.aggregated_levels.clone();
         result_clone.into_iter().map(|level| (level.last_price.into(), level.total_amount)).collect()
     }
 } 

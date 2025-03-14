@@ -31,7 +31,7 @@ where u64: From<Price>, Price: From<u64> {
         if !self.does_level_have_surplus(index, &cursor) {
             return;
         }
-        while true {
+        loop {
             let (&price, &amount) = cursor.peek_next().unwrap();
             // вот ето можно будет удалить, если всё делать в правильном порядке
             if self.aggregated_levels[index].last_price <= self.max_depth_price {
@@ -211,7 +211,7 @@ where u64: From<Price>, Price: From<u64> {
     fn remove_quote(self: &mut Self, 
         price: Price, 
         amount: Amount) {
-        let mut current_amount = self.levels.get_mut(&price).unwrap();
+        let current_amount = self.levels.get_mut(&price).unwrap();
         debug_assert!(*current_amount >= amount);
         *current_amount -= amount;
 
@@ -321,7 +321,7 @@ where u64: From<Price>, Price: From<u64> {
         return &self.aggregated_levels;
     }
     fn get_aggregated_levels_tuples(&self) -> Vec<(u64, u64)> {
-        let mut result_clone = self.aggregated_levels.clone();
+        let result_clone = self.aggregated_levels.clone();
         result_clone.into_iter().map(|level| (level.last_price.into(), level.total_amount)).collect()
     }
 } 

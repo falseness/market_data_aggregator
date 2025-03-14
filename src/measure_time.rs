@@ -1,14 +1,10 @@
 
-use crate::common::*;
-use crate::subscription::*;
 use crate::fast_solution::*;
 use crate::slow_solution_for_comparison::*;
-use crate::aggregated_l2_trait::*;
 
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use serde_json::Result;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")] // Ensure consistent casing if needed
@@ -41,7 +37,7 @@ fn measure_time<SolutionAsk: AgregatedL2Trait<AskKey>, SolutionBid: AgregatedL2T
     let ratio: f64 = 1e8;
 
     let start = Instant::now();
-    for i in 0..40000 {
+    for _ in 0..40000 {
         let mut solution_for_ask = SolutionAsk::new(table.clone());
         let mut solution_for_bid = SolutionBid::new(table.clone());
         for trade in arr.iter() {
