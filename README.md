@@ -74,8 +74,8 @@ cargo +nightly build --release
 Результат исполнения программы:
 ```
 Fast solution: 
-Time taken: 5.43s
+Time taken: 4.42s
 
 Slow obvious solution:
-Time taken: 15.74s
+Time taken: 15.58s
 ```

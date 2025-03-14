@@ -4,7 +4,6 @@
 pub use market_data_aggregator::common::*;
 pub use market_data_aggregator::solutions::fast::*;
 pub use market_data_aggregator::solutions::slow_for_comparisons::*;
-pub use market_data_aggregator::subscription::*;
 
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
