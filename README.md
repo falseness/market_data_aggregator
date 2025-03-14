@@ -1,5 +1,7 @@
 # market_data_aggregator
 
+(как запускать ниже)
+
 ## Идея алгоритма
 
 Храним агрегированный l2 как Vec<Price, Amount>, а исходный - BTreeMap<Price, Amount>.
