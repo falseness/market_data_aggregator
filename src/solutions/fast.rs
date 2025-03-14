@@ -3,6 +3,7 @@ pub use crate::solutions::aggregated_l2_trait::*;
 pub use crate::subscription::*;
 
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::ops::Bound;
 
 pub struct AggregatedL2<Price: OrderKey> {
@@ -152,9 +153,8 @@ where
 
         self.try_propogate_amount_surplus(index);
     }
-    fn add_quote(self: &mut Self, price: Price, amount: Amount) {
-        debug_assert!(self.levels.is_empty() == self.aggregated_levels.is_empty());
-        if self.levels.is_empty() {
+    fn add_quote(self: &mut Self, price: Price, amount: Amount, is_price_new: bool) {
+        if self.levels.len() == 1 && is_price_new {
             self.levels.insert(price, amount);
             self.aggregated_levels.push(AggregatedLevel {
                 last_price: price,
@@ -165,13 +165,6 @@ where
             }
             return;
         }
-        let is_price_new = match self.levels.try_insert(price, amount) {
-            Ok(_) => true,
-            Err(entry) => {
-                *entry.entry.into_mut() += amount;
-                false
-            }
-        };
 
         match self
             .aggregated_levels
@@ -259,13 +252,7 @@ where
         let (&price, _) = cursor.peek_prev().unwrap();
         self.aggregated_levels[index].last_price = price;
     }
-    fn remove_quote(self: &mut Self, price: Price, amount: Amount) {
-        let current_amount = self.levels.get_mut(&price).unwrap();
-        debug_assert!(*current_amount >= amount);
-        *current_amount -= amount;
-
-        let should_remove_quote = *current_amount == 0;
-
+    fn remove_quote(self: &mut Self, price: Price, amount: Amount, should_remove_quote: bool) {
         if should_remove_quote && price <= self.max_depth_price {
             self.try_update_max_depth_price_remove_quote()
         }
@@ -313,15 +300,28 @@ where
     }
     fn set_quote(self: &mut Self, price_: u64, new_amount: Amount) {
         let price = Price::from(price_);
-        if let Some(&current_amount) = self.levels.get(&price) {
-            match new_amount.cmp(&current_amount) {
-                std::cmp::Ordering::Greater => self.add_quote(price, new_amount - current_amount),
-                std::cmp::Ordering::Less => self.remove_quote(price, current_amount - new_amount),
-                std::cmp::Ordering::Equal => (),
+
+        let is_price_new = match self.levels.entry(price) {
+            Entry::Vacant(entry) => {
+                if new_amount != 0 {
+                    entry.insert(new_amount);
+                    self.add_quote(price, new_amount, /*is_price_new=*/true)
+                }
+            },
+            Entry::Occupied(mut entry) => {
+                let current_amount = *entry.get();
+                *entry.get_mut() = new_amount;
+
+                match new_amount.cmp(&current_amount) {
+                    std::cmp::Ordering::Greater => self.add_quote(price, new_amount - current_amount, false),
+                    std::cmp::Ordering::Less => {
+                        let should_remove_quote = new_amount == 0;
+                        self.remove_quote(price, current_amount - new_amount, should_remove_quote);
+                    },
+                    std::cmp::Ordering::Equal => (),
+                }
             }
-        } else if new_amount != 0 {
-            self.add_quote(price, new_amount);
-        }
+        };
     }
     fn get_levels(&self) -> &BTreeMap<Price, Amount> {
         return &self.levels;
