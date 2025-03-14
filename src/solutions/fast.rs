@@ -107,9 +107,7 @@ where
         }
         let mut cursor = self
             .levels
-            .lower_bound(Bound::Included(&self.max_depth_price));
-        debug_assert!(*cursor.peek_next().unwrap().0 == self.max_depth_price);
-        cursor.next();
+            .lower_bound(Bound::Excluded(&self.max_depth_price));
         if let Some((&price, &amount)) = cursor.peek_next() {
             self.max_depth_price = price;
             let index = self.aggregated_levels.len() - 1;
@@ -187,10 +185,7 @@ where
         // may be done faster but with worse readability
         let mut cursor = self
             .levels
-            .lower_bound(Bound::Included(&self.aggregated_levels[index].last_price));
-        debug_assert!(*cursor.peek_next().unwrap().0 == self.aggregated_levels[index].last_price);
-
-        cursor.next();
+            .lower_bound(Bound::Excluded(&self.aggregated_levels[index].last_price));
 
         let mut index_to_steal_quotes = index + 1;
         while let Some((&price, &amount)) = cursor.peek_next() {
