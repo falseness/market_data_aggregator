@@ -10,19 +10,17 @@ impl From<AskKey> for u64 {
     }
 }
 
-
 impl From<BidKey> for u64 {
     fn from(order_key: BidKey) -> Self {
         order_key.0
     }
 }
 
-
 /// Bid key (sorted descending)
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub struct BidKey(u64);
 impl OrderKey for BidKey {
-    const MAX: Self = Self(0); 
+    const MAX: Self = Self(0);
 }
 impl Ord for BidKey {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -65,10 +63,8 @@ impl PartialOrd for AskKey {
 
 pub type Amount = u64;
 
-
 #[derive(Debug, PartialEq, Clone)]
 pub struct AggregatedLevel<Price: OrderKey> {
     pub last_price: Price,
-    pub total_amount: Amount
+    pub total_amount: Amount,
 }
-
