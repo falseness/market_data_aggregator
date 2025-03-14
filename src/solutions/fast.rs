@@ -188,7 +188,7 @@ where
             .lower_bound(Bound::Excluded(&self.aggregated_levels[index].last_price));
 
         let mut index_to_steal_quotes = index + 1;
-        while let Some((&price, &amount)) = cursor.peek_next() {
+        while let Some((&price, &amount)) = cursor.next() {
             if price > self.max_depth_price {
                 return;
             }
@@ -203,7 +203,6 @@ where
             if self.aggregated_levels[index].total_amount
                 < self.subscription_rules.get_amount(index)
             {
-                cursor.next();
                 continue;
             }
             if index + 1 >= self.aggregated_levels.len() {
@@ -215,7 +214,6 @@ where
             }
             debug_assert!(index_to_steal_quotes > index + 1);
             index += 1;
-            cursor.next();
         }
     }
     fn remove_last_quote_in_level(self: &mut Self, price: Price, amount: Amount, should_remove_quote: bool, index: usize) {
