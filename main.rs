@@ -103,6 +103,8 @@ impl AggregatedLevel<Price: OrderKey> {
     }
 }*/
 
+
+
 #[derive(Debug, PartialEq, Clone)]
 struct AggregatedLevel<Price: OrderKey> {
     last_price: Price,
@@ -116,6 +118,12 @@ impl<Price: OrderKey> AggregatedLevel<Price> {
         }
     }
 }
+/*
+trait QuoteHandler<T> {
+        fn set_quote(&mut self, price_: Price, new_amount: Amount);
+    fn get_levels(&self) -> &BTreeMap<Price, Amount>;
+    fn get_aggregated_levels(&self) -> &Vec<AggregatedLevel<Price>>;
+}*/
 
 
 #[derive(Clone)]
@@ -652,7 +660,7 @@ fn main() {
     let file = File::open("l2.json").expect("Cannot open file");
     let reader = BufReader::new(file);
 
-    let table = AggregationTable::new(vec![1e13 as u64, 2e13 as u64, 1e13 as u64, 1e12 as u64], 1e13 as u64, 100);
+    let table = AggregationTable::new(vec![5e13 as u64, 2e14 as u64, 3e13 as u64, 4e12 as u64], 2e13 as u64, 300);
     //let mut fast_solution = AggregatedL2::<Price>::new(table.clone());
     //let mut slow_solution = SlowAggregatedL2ForTests::<Price>::new(table.clone());
     //let mut solution_for_ask = AggregatedL2::<AskKey>::new(table.clone());
@@ -669,9 +677,9 @@ fn main() {
     }
     
     let start = Instant::now(); // Start timer
-    for i in 0..10000 {
-        let mut solution_for_ask = AggregatedL2::<AskKey>::new(table.clone());
-        let mut solution_for_bid = AggregatedL2::<BidKey>::new(table.clone());
+    for i in 0..40000 {
+        let mut solution_for_ask = SlowAggregatedL2ForTests::<AskKey>::new(table.clone());
+        let mut solution_for_bid = SlowAggregatedL2ForTests::<BidKey>::new(table.clone());
         for trade in arr.iter() {
             let price = (trade.price * ratio).round() as u64;
             let amount = (trade.amount * ratio).round() as u64;
