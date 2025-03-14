@@ -51,9 +51,9 @@ mod tests {
         let mut fast_solution = AggregatedL2::<Price>::new(table.clone());
         let mut slow_solution = SlowAggregatedL2ForTests::<Price>::new(table.clone());
         
-        let mut rng = ChaCha8Rng::seed_from_u64(0);;
+        let mut rng = ChaCha8Rng::seed_from_u64(0);
         
-        for i in 0..100000 {
+        for _ in 0..100000 {
             let price = rng.gen_range(1..=42);
 
             let mut amount: u64 = rng.gen_range(0..=17);
