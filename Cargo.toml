@@ -15,4 +15,4 @@ serde_json = "1.0"
 
 [[bin]]
 name = "market_data_aggregator"
-path = "main.rs"
+path = "src/main.rs"

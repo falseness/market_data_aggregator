@@ -3,121 +3,14 @@
 
 use std::borrow::Borrow;
 use std::collections::BTreeMap;
-use std::cmp::Ordering;
+
 use std::convert::From;
 use std::ops::Bound;
 
-
-/// Generic trait for order keys (BidKey and AskKey)
-trait OrderKey: Ord + Eq + Copy + std::fmt::Debug + From<u64> {
-    const MAX: Self;
-}
-/*
-impl From<u64> for AskKey {
-    fn from(value: u64) -> Self {
-        Self(value)
-    }
-}
-
-impl From<u64> for BidKey {
-    fn from(value: u64) -> Self {
-        Self(value)
-    }
-}*/
-
-impl From<AskKey> for u64 {
-    fn from(order_key: AskKey) -> Self {
-        order_key.0
-    }
-}
-
-
-impl From<BidKey> for u64 {
-    fn from(order_key: BidKey) -> Self {
-        order_key.0
-    }
-}
-
-
-/// Bid key (sorted descending)
-#[derive(Debug, Eq, PartialEq, Copy, Clone)]
-struct BidKey(u64);
-impl OrderKey for BidKey {
-    const MAX: Self = Self(0); 
-}
-impl Ord for BidKey {
-    fn cmp(&self, other: &Self) -> Ordering {
-        other.0.cmp(&self.0) // Reverse order for highest bid first
-    }
-}
-impl PartialOrd for BidKey {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-impl From<u64> for BidKey {
-    fn from(price: u64) -> Self {
-        BidKey(price)
-    }
-}
-
-/// Ask key (sorted ascending)
-#[derive(Debug, Eq, PartialEq, Copy, Clone)]
-struct AskKey(u64);
-impl OrderKey for AskKey {
-    const MAX: Self = Self(u64::MAX);
-}
-impl Ord for AskKey {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.0.cmp(&other.0) // Normal order for lowest ask first
-    }
-}
-impl From<u64> for AskKey {
-    fn from(price: u64) -> Self {
-        AskKey(price)
-    }
-}
-
-impl PartialOrd for AskKey {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-
-type Amount = u64;
-/*
-struct AggregatedLevel<Price: OrderKey> {
-    Price last_price;
-    Amount total_amount;
-    BTreeMap<Price, Amount> contained_levels;
-};
-
-impl AggregatedLevel<Price: OrderKey> {
-    fn new(Price price, Amount amount) -> Self {
-        let mut map = BTreeMap::new();
-        map.insert(price, amount);
-        return Self {
-            price, amount, map
-        }
-    }
-}*/
-
-
-
-#[derive(Debug, PartialEq, Clone)]
-struct AggregatedLevel<Price: OrderKey> {
-    last_price: Price,
-    total_amount: Amount
-}
-
-impl<Price: OrderKey> AggregatedLevel<Price> {
-    fn new(last_price: Price, total_amount: Amount) -> Self {
-        return Self{
-            last_price, total_amount
-        }
-    }
-}
+pub mod common;
+pub use common::*;
+pub mod subscription;
+pub use subscription::*;
 /*
 trait QuoteHandler<T> {
         fn set_quote(&mut self, price_: Price, new_amount: Amount);
@@ -126,42 +19,13 @@ trait QuoteHandler<T> {
 }*/
 
 
-#[derive(Clone)]
-struct AggregationTable {
-    minimum_amounts: Vec<Amount>,
-    fallback: Amount,
-    max_depth: usize
-}
-
-impl AggregationTable {
-    fn get_amount(self: &Self, index: usize) -> Amount {
-        if index >= self.minimum_amounts.len() {
-            return self.fallback;
-        }
-        return self.minimum_amounts[index];
-    }
-    fn new(minimum_amounts: Vec<Amount>,
-        fallback: Amount,
-        max_depth: usize) -> Self {
-
-        assert!(minimum_amounts.iter().all(|&x| x > 0));
-        assert!(fallback > 0);
-        assert!(max_depth > 0);
-        
-        return Self {
-            minimum_amounts,
-            fallback,
-            max_depth
-        }
-    }
-}
-
 struct AggregatedL2<Price: OrderKey> {
     levels: BTreeMap<Price, Amount>,
     max_depth_price: Price,
     aggregated_levels: Vec<AggregatedLevel<Price>>,
     aggregation_table: AggregationTable
 }
+
 
 // проверь книгу на пустоту
 impl<Price: OrderKey> AggregatedL2<Price> 
@@ -187,7 +51,7 @@ where u64: From<Price>, Price: From<u64> {
             // вот ето можно будет удалить, если всё делать в правильном порядке
             if self.aggregated_levels[index].last_price <= self.max_depth_price {
                 if index + 1 == self.aggregated_levels.len() {
-                    self.aggregated_levels.push(AggregatedLevel::new(price, amount));
+                    self.aggregated_levels.push(AggregatedLevel{last_price: price, total_amount: amount});
                 }
                 else {
                     self.aggregated_levels[index + 1].total_amount += amount;
@@ -255,7 +119,7 @@ where u64: From<Price>, Price: From<u64> {
                 self.aggregated_levels[index].total_amount += amount;
             }
             else {
-                self.aggregated_levels.push(AggregatedLevel::new(price, amount));
+                self.aggregated_levels.push(AggregatedLevel{last_price: price, total_amount: amount});
             }
         }
         else {
@@ -270,7 +134,7 @@ where u64: From<Price>, Price: From<u64> {
         debug_assert!(self.levels.is_empty() == self.aggregated_levels.is_empty());
         if self.levels.is_empty() {
             self.levels.insert(price, amount);
-            self.aggregated_levels.push(AggregatedLevel::new(price, amount));
+            self.aggregated_levels.push(AggregatedLevel{last_price: price, total_amount: amount});
             if self.aggregation_table.max_depth == 1 {
                 self.max_depth_price = price;
             }
@@ -518,12 +382,12 @@ where Price: From<u64>  {
             }
             self.max_depth_price = price;
             if self.aggregated_levels.is_empty() {
-                self.aggregated_levels.push(AggregatedLevel::new(price, amount));
+                self.aggregated_levels.push(AggregatedLevel{last_price: price, total_amount: amount});
                 continue;
             }
             let index = self.aggregated_levels.len() - 1;
             if self.aggregated_levels[index].total_amount >= self.aggregation_table.get_amount(index) {
-                self.aggregated_levels.push(AggregatedLevel::new(price, amount));
+                self.aggregated_levels.push(AggregatedLevel{last_price: price, total_amount: amount});
             }
             else {
                 self.aggregated_levels[index].last_price = price;
