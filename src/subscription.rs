@@ -3,13 +3,13 @@ use crate::common::*;
 
 
 #[derive(Clone)]
-pub struct AggregationTable {
+pub struct SubscriptionRules {
     minimum_amounts: Vec<Amount>,
     fallback: Amount,
     pub max_depth: usize
 }
 
-impl AggregationTable {
+impl SubscriptionRules {
     pub fn get_amount(self: &Self, index: usize) -> Amount {
         if index >= self.minimum_amounts.len() {
             return self.fallback;

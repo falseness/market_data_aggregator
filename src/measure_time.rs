@@ -1,6 +1,6 @@
 
-use crate::fast_solution::*;
-use crate::slow_solution_for_comparison::*;
+use crate::solutions::fast::*;
+use crate::solutions::slow_for_comparisons::*;
 
 use serde::{Deserialize, Serialize};
 use std::fs::File;
@@ -33,13 +33,13 @@ fn is_integer(num: f64) -> bool {
 use std::time::Instant;
 
 
-fn measure_time<SolutionAsk: AgregatedL2Trait<AskKey>, SolutionBid: AgregatedL2Trait<BidKey>>(arr: &Vec::<Trade>, table: &AggregationTable) {
+fn measure_time<SolutionAsk: AgregatedL2Trait<AskKey>, SolutionBid: AgregatedL2Trait<BidKey>>(arr: &Vec::<Trade>, subscription: &SubscriptionRules) {
     let ratio: f64 = 1e8;
 
     let start = Instant::now();
     for _ in 0..40000 {
-        let mut solution_for_ask = SolutionAsk::new(table.clone());
-        let mut solution_for_bid = SolutionBid::new(table.clone());
+        let mut solution_for_ask = SolutionAsk::new(subscription.clone());
+        let mut solution_for_bid = SolutionBid::new(subscription.clone());
         for trade in arr.iter() {
             let price = (trade.price * ratio).round() as u64;
             let amount = (trade.amount * ratio).round() as u64;
@@ -67,7 +67,7 @@ pub fn measure_time_for_both_solutions() {
     let file = File::open("l2.json").expect("Cannot open file");
     let reader = BufReader::new(file);
 
-    let table = AggregationTable::new(vec![5e13 as u64, 2e14 as u64, 3e13 as u64, 4e12 as u64], 2e13 as u64, 300);
+    let subscription = SubscriptionRules::new(vec![5e13 as u64, 2e14 as u64, 3e13 as u64, 4e12 as u64], 2e13 as u64, 300);
 
     let mut arr = Vec::<Trade>::new();
 
@@ -78,8 +78,8 @@ pub fn measure_time_for_both_solutions() {
     }
 
     println!("Fast solution: ");
-    measure_time::<AggregatedL2<AskKey>, AggregatedL2<BidKey>>(&arr, &table);
+    measure_time::<AggregatedL2<AskKey>, AggregatedL2<BidKey>>(&arr, &subscription);
 
     println!("\nSlow obvious solution:");
-    measure_time::<SlowAggregatedL2ForTests<AskKey>, SlowAggregatedL2ForTests<BidKey>>(&arr, &table);
+    measure_time::<SlowAggregatedL2ForTests<AskKey>, SlowAggregatedL2ForTests<BidKey>>(&arr, &subscription);
 }

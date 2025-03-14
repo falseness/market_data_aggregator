@@ -1,6 +1,6 @@
 use crate::common::*;
 use crate::subscription::*;
-use crate::aggregated_l2_trait::AgregatedL2Trait;
+use crate::solutions::aggregated_l2_trait::AgregatedL2Trait;
 
 use std::collections::BTreeMap;
 
@@ -8,7 +8,7 @@ pub struct SlowAggregatedL2ForTests<Price: OrderKey> {
     levels: BTreeMap<Price, Amount>,
     max_depth_price: Price,
     aggregated_levels: Vec<AggregatedLevel<Price>>,
-    aggregation_table: AggregationTable
+    subscription_rules: SubscriptionRules
 }
 
 
@@ -22,11 +22,11 @@ where u64: From<Price>, Price: From<u64>  {
 
 impl<Price: OrderKey> AgregatedL2Trait<Price> for SlowAggregatedL2ForTests<Price> 
 where u64: From<Price>, Price: From<u64> {
-    fn new(table: AggregationTable) -> Self {
+    fn new(subscription_rules: SubscriptionRules) -> Self {
         Self {
             levels: BTreeMap::new(),
             aggregated_levels: Vec::new(),
-            aggregation_table: table,
+            subscription_rules: subscription_rules,
             max_depth_price: Price::MAX
         }
     }
@@ -52,7 +52,7 @@ where u64: From<Price>, Price: From<u64> {
         self.aggregated_levels.clear();
         for (quote_index, (&price, &amount)) in self.levels.iter().enumerate() {
             debug_assert!(amount > 0);
-            if quote_index + 1 > self.aggregation_table.max_depth {
+            if quote_index + 1 > self.subscription_rules.max_depth {
                 break;
             }
             self.max_depth_price = price;
@@ -61,7 +61,7 @@ where u64: From<Price>, Price: From<u64> {
                 continue;
             }
             let index = self.aggregated_levels.len() - 1;
-            if self.aggregated_levels[index].total_amount >= self.aggregation_table.get_amount(index) {
+            if self.aggregated_levels[index].total_amount >= self.subscription_rules.get_amount(index) {
                 self.aggregated_levels.push(AggregatedLevel{last_price: price, total_amount: amount});
             }
             else {
@@ -69,7 +69,7 @@ where u64: From<Price>, Price: From<u64> {
                 self.aggregated_levels[index].total_amount += amount;
             }
         }
-        if self.levels.len() < self.aggregation_table.max_depth {
+        if self.levels.len() < self.subscription_rules.max_depth {
             self.max_depth_price = Price::MAX;
         }
     }

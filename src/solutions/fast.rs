@@ -1,6 +1,6 @@
 pub use crate::common::*;
 pub use crate::subscription::*;
-pub use crate::aggregated_l2_trait::*;
+pub use crate::solutions::aggregated_l2_trait::*;
 
 use std::collections::BTreeMap;
 use std::ops::Bound;
@@ -9,7 +9,7 @@ pub struct AggregatedL2<Price: OrderKey> {
     levels: BTreeMap<Price, Amount>,
     max_depth_price: Price,
     aggregated_levels: Vec<AggregatedLevel<Price>>,
-    aggregation_table: AggregationTable
+    subscription_rules: SubscriptionRules
 }
 
 
@@ -17,7 +17,7 @@ impl<Price: OrderKey> AggregatedL2<Price>
 where u64: From<Price>, Price: From<u64> {
     fn does_level_have_surplus(self: &Self, 
         index: usize, cursor_to_last_element: &std::collections::btree_map::Cursor<Price, Amount>) -> bool {
-        return self.aggregated_levels[index].total_amount - cursor_to_last_element.peek_next().unwrap().1 >= self.aggregation_table.get_amount(index);
+        return self.aggregated_levels[index].total_amount - cursor_to_last_element.peek_next().unwrap().1 >= self.subscription_rules.get_amount(index);
     }
 
     fn try_propogate_amount_surplus(
@@ -77,7 +77,7 @@ where u64: From<Price>, Price: From<u64> {
         let has_cut_by_depth = self.max_depth_price != Price::MAX;
         if !has_cut_by_depth {
             // предполагаем, что max_depth != 0
-            if self.levels.len() == self.aggregation_table.max_depth {
+            if self.levels.len() == self.subscription_rules.max_depth {
                 self.max_depth_price = *self.levels.last_key_value().unwrap().0;
             }
             return;
@@ -99,7 +99,7 @@ where u64: From<Price>, Price: From<u64> {
         if let Some((&price, &amount)) = cursor.peek_next() {
             self.max_depth_price = price;
             let index = self.aggregated_levels.len() - 1;
-            if self.aggregated_levels[index].total_amount < self.aggregation_table.get_amount(index) {
+            if self.aggregated_levels[index].total_amount < self.subscription_rules.get_amount(index) {
                 self.aggregated_levels[index].last_price = price;
                 self.aggregated_levels[index].total_amount += amount;
             }
@@ -120,7 +120,7 @@ where u64: From<Price>, Price: From<u64> {
         if self.levels.is_empty() {
             self.levels.insert(price, amount);
             self.aggregated_levels.push(AggregatedLevel{last_price: price, total_amount: amount});
-            if self.aggregation_table.max_depth == 1 {
+            if self.subscription_rules.max_depth == 1 {
                 self.max_depth_price = price;
             }
             return;
@@ -148,7 +148,7 @@ where u64: From<Price>, Price: From<u64> {
                     }
                     debug_assert!(self.max_depth_price == Price::MAX);
                     
-                    if self.levels.len() == self.aggregation_table.max_depth {
+                    if self.levels.len() == self.subscription_rules.max_depth {
                         debug_assert!(is_price_new);
                         self.max_depth_price = price;
                     }
@@ -171,7 +171,7 @@ where u64: From<Price>, Price: From<u64> {
     }
     fn try_propogate_shortage(self: &mut Self, mut index: usize) {
         // There may be levels with total_amount == 0 after the method execution
-        if self.aggregated_levels[index].total_amount >= self.aggregation_table.get_amount(index) {
+        if self.aggregated_levels[index].total_amount >= self.subscription_rules.get_amount(index) {
             return;
         } 
         let mut cursor = self.levels.lower_bound(Bound::Included(&self.aggregated_levels[index].last_price));
@@ -192,7 +192,7 @@ where u64: From<Price>, Price: From<u64> {
                     index_to_steal_quotes += 1;
                 }
             }
-            if self.aggregated_levels[index].total_amount < self.aggregation_table.get_amount(index) {
+            if self.aggregated_levels[index].total_amount < self.subscription_rules.get_amount(index) {
                 cursor.next();
                 continue;
             }
@@ -291,12 +291,12 @@ where u64: From<Price>, Price: From<u64> {
 
 impl<Price: OrderKey> AgregatedL2Trait<Price> for AggregatedL2<Price> 
 where u64: From<Price>, Price: From<u64> {
-    fn new(table: AggregationTable) -> Self {
+    fn new(table: SubscriptionRules) -> Self {
         Self {
             levels: BTreeMap::new(),
             max_depth_price: Price::MAX,
             aggregated_levels: Vec::new(),
-            aggregation_table: table,
+            subscription_rules: table,
         }
     }
     fn set_quote(self: &mut Self, 
