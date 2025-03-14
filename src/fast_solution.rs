@@ -1,5 +1,6 @@
-use crate::common::*;
-use crate::subscription::*;
+pub use crate::common::*;
+pub use crate::subscription::*;
+pub use crate::aggregated_l2_trait::*;
 
 use std::collections::BTreeMap;
 use std::ops::Bound;
@@ -282,14 +283,6 @@ where u64: From<Price>, Price: From<u64> {
             self.levels.remove(&price);
         }
     }
-    pub fn new(table: AggregationTable) -> Self {
-        Self {
-            levels: BTreeMap::new(),
-            max_depth_price: Price::MAX,
-            aggregated_levels: Vec::new(),
-            aggregation_table: table,
-        }
-    }
     pub fn get_max_depth_price(&self) -> Price {
         return self.max_depth_price
     }
@@ -298,6 +291,14 @@ where u64: From<Price>, Price: From<u64> {
 
 impl<Price: OrderKey> AgregatedL2Trait<Price> for AggregatedL2<Price> 
 where u64: From<Price>, Price: From<u64> {
+    fn new(table: AggregationTable) -> Self {
+        Self {
+            levels: BTreeMap::new(),
+            max_depth_price: Price::MAX,
+            aggregated_levels: Vec::new(),
+            aggregation_table: table,
+        }
+    }
     fn set_quote(self: &mut Self, 
         price_: u64, 
         new_amount: Amount) {

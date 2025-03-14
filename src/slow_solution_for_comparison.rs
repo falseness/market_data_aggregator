@@ -1,5 +1,6 @@
 use crate::common::*;
 use crate::subscription::*;
+use crate::aggregated_l2_trait::AgregatedL2Trait;
 
 use std::collections::BTreeMap;
 
@@ -13,15 +14,6 @@ pub struct SlowAggregatedL2ForTests<Price: OrderKey> {
 
 impl<Price: OrderKey> SlowAggregatedL2ForTests<Price>
 where u64: From<Price>, Price: From<u64>  {
-    pub fn new(table: AggregationTable) -> Self {
-        Self {
-            levels: BTreeMap::new(),
-            aggregated_levels: Vec::new(),
-            aggregation_table: table,
-            max_depth_price: Price::MAX
-        }
-    }
-
     pub fn get_max_depth_price(&self) -> Price {
         return self.max_depth_price
     }
@@ -30,6 +22,14 @@ where u64: From<Price>, Price: From<u64>  {
 
 impl<Price: OrderKey> AgregatedL2Trait<Price> for SlowAggregatedL2ForTests<Price> 
 where u64: From<Price>, Price: From<u64> {
+    fn new(table: AggregationTable) -> Self {
+        Self {
+            levels: BTreeMap::new(),
+            aggregated_levels: Vec::new(),
+            aggregation_table: table,
+            max_depth_price: Price::MAX
+        }
+    }
     fn set_quote(self: &mut Self, 
         price_: u64, 
         new_amount: Amount) {
