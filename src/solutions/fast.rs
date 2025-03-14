@@ -82,10 +82,10 @@ where
         }
     }
     fn try_update_max_depth_price(self: &mut Self) {
-        // invariant: был добавлен элемент СЛЕВА от self.max_depth_price
+        // invariant: element wath added to the left of self.max_depth_price
         let has_cut_by_depth = self.max_depth_price != Price::MAX;
         if !has_cut_by_depth {
-            // предполагаем, что max_depth != 0
+            debug_assert!(self.subscription_rules.max_depth != 0);
             if self.levels.len() == self.subscription_rules.max_depth {
                 self.max_depth_price = *self.levels.last_key_value().unwrap().0;
             }
@@ -99,7 +99,7 @@ where
     }
 
     fn try_update_max_depth_price_remove_quote(self: &mut Self) {
-        // invariant: был УДАЛЕН элемент СЛЕВА от self.max_depth_price
+        // invariant: element wath removed to the left of self.max_depth_price
         let has_cut_by_depth = self.max_depth_price != Price::MAX;
         if !has_cut_by_depth {
             return;
@@ -126,6 +126,31 @@ where
         } else {
             self.max_depth_price = Price::MAX;
         }
+    }
+    fn add_quote_not_found_in_aggregated_levels(self: &mut Self, price: Price, amount: Amount, is_price_new: bool, mut index: usize) {
+        if index == self.aggregated_levels.len() {
+            if price > self.max_depth_price {
+                return;
+            }
+            debug_assert!(self.max_depth_price == Price::MAX);
+
+            if self.levels.len() == self.subscription_rules.max_depth {
+                debug_assert!(is_price_new);
+                self.max_depth_price = price;
+            }
+            index -= 1;
+            self.aggregated_levels[index].last_price = price;
+            self.aggregated_levels[index].total_amount += amount;
+        } else {
+            self.aggregated_levels[index].total_amount += amount;
+            if is_price_new {
+                debug_assert!(price < self.max_depth_price);
+                self.try_update_max_depth_price();
+                self.try_cut_by_max_depth();
+            }
+        }
+
+        self.try_propogate_amount_surplus(index);
     }
     fn add_quote(self: &mut Self, price: Price, amount: Amount) {
         debug_assert!(self.levels.is_empty() == self.aggregated_levels.is_empty());
@@ -157,29 +182,7 @@ where
                 return;
             }
             Err(mut index) => {
-                if index == self.aggregated_levels.len() {
-                    if price > self.max_depth_price {
-                        return;
-                    }
-                    debug_assert!(self.max_depth_price == Price::MAX);
-
-                    if self.levels.len() == self.subscription_rules.max_depth {
-                        debug_assert!(is_price_new);
-                        self.max_depth_price = price;
-                    }
-                    index -= 1;
-                    self.aggregated_levels[index].last_price = price;
-                    self.aggregated_levels[index].total_amount += amount;
-                } else {
-                    self.aggregated_levels[index].total_amount += amount;
-                    if is_price_new {
-                        debug_assert!(price < self.max_depth_price);
-                        self.try_update_max_depth_price();
-                        self.try_cut_by_max_depth();
-                    }
-                }
-
-                self.try_propogate_amount_surplus(index);
+                self.add_quote_not_found_in_aggregated_levels(price, amount, is_price_new, index);
             }
         }
     }
@@ -188,6 +191,7 @@ where
         if self.aggregated_levels[index].total_amount >= self.subscription_rules.get_amount(index) {
             return;
         }
+        // may be done faster but with worse readability
         let mut cursor = self
             .levels
             .lower_bound(Bound::Included(&self.aggregated_levels[index].last_price));
@@ -226,26 +230,41 @@ where
             cursor.next();
         }
     }
+    fn remove_last_quote_in_level(self: &mut Self, price: Price, amount: Amount, should_remove_quote: bool, index: usize) {
+        debug_assert!(self.aggregated_levels[index].last_price == price);
+        self.aggregated_levels[index].total_amount -= amount;
+
+        self.try_propogate_shortage(index);
+        if !should_remove_quote || self.aggregated_levels[index].last_price != price {
+            while !self.aggregated_levels.is_empty()
+                && self.aggregated_levels.last().unwrap().total_amount == 0
+            {
+                self.aggregated_levels.pop();
+            }
+            return;
+        }
+        // last_price was not updated by element to the right. so try to update it by previous elements
+        let cursor = self
+            .levels
+            .lower_bound(Bound::Included(&self.aggregated_levels[index].last_price));
+        debug_assert!(
+            *cursor.peek_next().unwrap().0 == self.aggregated_levels[index].last_price
+        );
+
+        if self.aggregated_levels[index].total_amount == 0 {
+            debug_assert!(index + 1 == self.aggregated_levels.len());
+            self.aggregated_levels.pop();
+            return;
+        }
+        let (&price, _) = cursor.peek_prev().unwrap();
+        self.aggregated_levels[index].last_price = price;
+    }
     fn remove_quote(self: &mut Self, price: Price, amount: Amount) {
         let current_amount = self.levels.get_mut(&price).unwrap();
         debug_assert!(*current_amount >= amount);
         *current_amount -= amount;
 
         let should_remove_quote = *current_amount == 0;
-        /*let should_remove_quote = match self.levels.entry(price) {
-            std::collections::btree_map::Entry::Occupied(mut entry) => {
-                let value = entry.get_mut();
-                *value -= amount;
-                if *value == 0 {
-                    //entry.remove();
-                    true
-                }
-                else {false}
-            }
-            std::collections::btree_map::Entry::Vacant(_) => {
-                panic!("incorrect request in remove_quote!");
-            }
-        };*/
 
         if should_remove_quote && price <= self.max_depth_price {
             self.try_update_max_depth_price_remove_quote()
@@ -254,45 +273,8 @@ where
             .aggregated_levels
             .binary_search_by(|level| level.last_price.cmp(&price))
         {
-            Ok(index) => 'block: {
-                self.aggregated_levels[index].total_amount -= amount;
-
-                self.try_propogate_shortage(index);
-                if !should_remove_quote {
-                    while !self.aggregated_levels.is_empty()
-                        && self.aggregated_levels.last().unwrap().total_amount == 0
-                    {
-                        self.aggregated_levels.pop();
-                    }
-                    break 'block;
-                }
-                // last_price был обновлен элементами справа
-                if self.aggregated_levels[index].last_price != price {
-                    while !self.aggregated_levels.is_empty()
-                        && self.aggregated_levels.last().unwrap().total_amount == 0
-                    {
-                        self.aggregated_levels.pop();
-                    }
-                    break 'block;
-                }
-                let cursor = self
-                    .levels
-                    .lower_bound(Bound::Included(&self.aggregated_levels[index].last_price));
-                debug_assert!(
-                    *cursor.peek_next().unwrap().0 == self.aggregated_levels[index].last_price
-                );
-
-                if self.aggregated_levels[index].total_amount == 0 {
-                    debug_assert!(index + 1 == self.aggregated_levels.len());
-                    self.aggregated_levels.pop();
-                    break 'block;
-                }
-                if let Some((&price, _)) = cursor.peek_prev() {
-                    self.aggregated_levels[index].last_price = price;
-                } else {
-                    debug_assert!(index + 1 == self.aggregated_levels.len());
-                    self.aggregated_levels.pop();
-                }
+            Ok(index) => {
+                self.remove_last_quote_in_level(price, amount, should_remove_quote, index);
             }
             Err(index) => 'block: {
                 if index == self.aggregated_levels.len() {
